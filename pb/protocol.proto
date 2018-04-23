@@ -1,0 +1,46 @@
+syntax = "proto3";
+
+package pb;
+
+service Synchronizer {
+
+  rpc router (RouterRequest) returns (RouterResponse) {}
+
+  rpc heart (HeartRequest) returns (HeartResponse) {}
+
+  rpc listen (stream ListenReq) returns (stream StreamRsp) {}
+}
+
+message RouterRequest {
+  string routerType = 1;
+  string routerName = 2;
+  bytes msg = 3;
+}
+
+message RouterResponse {
+  string code = 1;
+}
+
+message HeartRequest {
+  string routerType = 1;
+  string serverName = 2;
+  string name = 3;
+  string ip = 4;
+  bytes msg = 5;
+}
+
+message HeartResponse {
+  string code = 1;
+}
+
+// The request listen
+message ListenReq {
+  string serverName = 1;
+  string name = 2;
+  string ip = 3;
+}
+
+// The stream rsp
+message StreamRsp {
+  bytes msg = 1;
+}
