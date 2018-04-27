@@ -41,10 +41,6 @@ func LoadConfig(filePath string) (*config.Config, error) {
 		return nil, errors.NoBasedirErr
 	}
 
-	if len(c.Node) == 0 {
-		return nil, errors.NoPrivateNodeErr
-	}
-
 	if c.EthereumConfig.GasLimit > 0 {//修改默认gaslimit
 		config.DefPubEthGasLimit = c.EthereumConfig.GasLimit
 	}

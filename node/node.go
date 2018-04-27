@@ -50,7 +50,7 @@ type HashResult struct {
 
 //init
 func InitConn(cfg *config.Config, db localdb.Database) (*NodeApi, error) {
-	log.Info("InitConn....%v", cfg.Node)
+	log.Info("InitConn....")
 	nodeApi := &NodeApi{cfg: cfg.AgentSerCfg, db: db, heartQuitCh: make(chan struct{}, 1), quitCh: make(chan struct{}, 1)}
 	cred, err := nodeApi.loadCredential(cfg.AgentSerCfg.ClientCertPath, cfg.AgentSerCfg.ClientKeyPath)
 	if err != nil {

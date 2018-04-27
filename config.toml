@@ -80,15 +80,6 @@ accountPoolSize = 2
 blockNoFilePath = "/Users/admin/Work/src/github.com/boxproject/voucher/blockno.txt"
 nonceFilePath = "/Users/admin/Work/src/github.com/boxproject/voucher/nonce.txt"
 
-# 测试环境，私链节点1
-[[node]]
-name = "dev02"
-rpcapi = "127.0.0.1:50502"
-# 如果不填该参数，默认查找 ${basedir}/certs/${name}.pem
-clientcert = "/Users/admin/ssl/client.pem"
-# 如果不填该参数，默认查找 ${basedir}/certs/${name}.key
-clientkey = "/Users/admin/ssl/client.key"
-
 # bitcoin node
 [bitcoin]
 type = "regtest"

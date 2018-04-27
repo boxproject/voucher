@@ -15,7 +15,6 @@ package config
 
 import (
 	"fmt"
-	"strings"
 )
 
 const (
@@ -38,30 +37,15 @@ type Config struct {
 	AgentSerCfg    AgentServiceConfig `toml:"agentservice"`
 	Secret         SecretConfig       `toml:"secret"`
 	DB             DatabaseConfig     `toml:"database"`
-	Node           []NodeConfig       `toml:"node"`
 	LogConfig      LogConfig          `toml:"log"`
 	CertHTTPConfig CertHTTPConfig     `toml:"service"`
 	APIConfig      APIConfig          `toml:"api"`
 	EthereumConfig EthereumConfig     `toml:"ethereum"`
 	BitcoinConfig  BitcoinConfig      `toml:"bitcoin"` //add by john.yang
-	//EthTokens      []EthToken         `toml:"ethtokens"`
 }
 
 func (c *Config) String() string {
-	nodes := make([]string, len(c.Node))
-	for i, node := range c.Node {
-		nodes[i] = node.String()
-	}
-	nodesInfo := strings.Join(nodes, "\n")
-
-	//ethTokens := make([]string, len(c.EthTokens))
-	//for i, ethToken := range c.EthTokens {
-	//	ethTokens[i] = ethToken.String()
-	//}
-
-	//ethTokensInfo := strings.Join(ethTokens, "\n")
-	//return fmt.Sprintf("[Base DIR] %s\n[Database]\n%s\n\n[Nodes]\n%s\n%s\n", c.Basedir, c.DB, nodesInfo, ethTokensInfo)
-	return fmt.Sprintf("[Base DIR] %s\n[Database]\n%s\n\n[Nodes]\n%s\n", c.Basedir, c.DB, nodesInfo)
+	return fmt.Sprintf("[Base DIR] %s\n[Database]\n%s\n\n[Nodes]\n%s\n", c.Basedir, c.DB)
 }
 
 type AgentServiceConfig struct {
@@ -132,18 +116,6 @@ type EthereumConfig struct {
 	CursorFilePath  string `toml:cursorFilePath`
 }
 
-//type EthToken struct {
-//	Category     int64  `toml:"category"`
-//	TokenName    string `toml:tokenName`
-//	TokenAddress string `toml:tokenAddress`
-//	Decimals     int64  `toml:decimals`
-//}
-
-//func (e EthToken) String() string {
-//	return fmt.Sprintf("[%s]\nCategory: %d\nTokenAddress: %s\nDecimals:%d\n", e.TokenName, e.Category, e.TokenAddress, e.Decimals)
-//}
-
-//add by john.yang				----add begin
 type BitcoinConfig struct {
 	Type          	 string   `toml:"type"`
 	Host            string `toml:"host"`
@@ -156,5 +128,3 @@ type BitcoinConfig struct {
 	Initheight      int64  `toml:initheight`
 	BlockNoFilePath string `toml:blockNoFilePath`
 }
-
-//add by john.yang				----add begin

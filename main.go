@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:generate protoc --go_out=plugins=grpc:. pb/protocol.proto
-//go:generate abigen -pkg trans -sol trans/contracts/sink.sol -out trans/sink.sol.go
-//go:generate abigen -pkg trans -sol trans/contracts/wallet.sol -out trans/wallet.sol.go
+///go:generate protoc --go_out=plugins=grpc:. pb/protocol.proto
+///go:generate abigen -pkg trans -sol trans/contracts/sink.sol -out trans/sink.sol.go
+///go:generate abigen -pkg trans -sol trans/contracts/wallet.sol -out trans/wallet.sol.go
 package main
 
 import (
