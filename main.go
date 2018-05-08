@@ -61,8 +61,6 @@ func run(ctx *cli.Context) (err error) {
 		return err
 	}
 
-	printQrCode(cfg)
-
 	//log
 	//if err = log.InitLogger(&cfg.LogConfig); err != nil {
 	//	log.Errorf("init logger failed. cause: %v", err)
@@ -86,6 +84,8 @@ func run(ctx *cli.Context) (err error) {
 		return err
 	}
 	defer db.Close()
+
+	printQrCode(cfg, db)
 
 	//init status
 	initStatus(cfg, db)
@@ -208,9 +208,8 @@ func PrintVersion(gitCommit, stage, version string) string {
 	return fmt.Sprintf("%s-%s", stage, version)
 }
 
-func printQrCode(cfg *config.Config) {
-	qrCodeArrays := []string{cfg.AgentSerCfg.IpAndPort, util.GetAesKeyRandom()}
+func printQrCode(cfg *config.Config, db localdb.Database) {
+	qrCodeArrays := []string{cfg.AgentSerCfg.IpAndPort, string(util.GetAesKeyRandomFromDb(db))}
 	qrCodeByte, _ := json.Marshal(qrCodeArrays)
-	fmt.Println("keys:", string(qrCodeByte))
 	qrterminal.Generate(string(qrCodeByte), qrterminal.L, os.Stdout)
 }

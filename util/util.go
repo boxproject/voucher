@@ -2,7 +2,6 @@ package util
 
 import (
 	//"bytes"
-	"fmt"
 	log "github.com/alecthomas/log4go"
 	"io/ioutil"
 	//"math/big"
@@ -62,10 +61,8 @@ func DefaultConfigDir() string {
 // configPath 不为空时，不检查fileName
 func GetConfigFilePath(configPath, defaultFileName string) string {
 	for i := 0; i < 3; i++ {
-		fmt.Println("i......", i)
 		if configPath != "" {
 			if _, err := os.Stat(configPath); !os.IsNotExist(err) {
-				fmt.Println("Stat....", err)
 				break
 			}
 		}
@@ -159,32 +156,32 @@ func GetCurrentIp() string {
 	return "localhost"
 }
 
-var cbcKey string = "abcdefghijklmnop" //default
-
-func GetAesKeyRandom() string {
-	if cbcKey == "" {
-		r := rand.New(rand.NewSource(time.Now().UnixNano())) //添加时间生成随机数
-		key := make([]byte, aes.BlockSize)
-		copy(key, []byte(string(r.Intn(100000))))
-		cbcKey = string(key)
-		//更新key
-	}
-	return cbcKey
-}
+//var cbcKey string//default
+//
+//func GetAesKeyRandom() string {
+//	if cbcKey == "" {
+//		r := rand.New(rand.NewSource(time.Now().UnixNano())) //添加时间生成随机数
+//		key := make([]byte, aes.BlockSize)
+//		copy(key, []byte(string(r.Intn(100000))))
+//		cbcKey = string(key)
+//		//更新key
+//	}
+//	return cbcKey
+//}
 
 //aes key 存入db
-func GetAesKeyRandomFromDb(db localdb.Database) string {
+func GetAesKeyRandomFromDb(db localdb.Database) []byte {
 	if aesKeyBytes, err := db.Get([]byte(config.APP_KEY_PRIFIX)); err != nil {
 		log.Info("get app key failed. err : %s", err)
 		r := rand.New(rand.NewSource(time.Now().UnixNano())) //添加时间生成随机数
-		key := make([]byte, aes.BlockSize)
-		copy(key, []byte(string(r.Intn(10000000))))
-		cbcKey = string(key)
-		if err = db.Put([]byte(config.APP_KEY_PRIFIX), key); err != nil {
+		cbcKey := make([]byte, aes.BlockSize)
+		copy(cbcKey, []byte(string(r.Intn(100000000000000))))
+		if err = db.Put([]byte(config.APP_KEY_PRIFIX), cbcKey); err != nil {
 			log.Debug("land aes to db err: %s", err)
 		}
+		return cbcKey
 	} else {
-		cbcKey = string(aesKeyBytes)
+		return aesKeyBytes
 	}
-	return cbcKey
+
 }

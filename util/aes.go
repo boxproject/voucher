@@ -11,7 +11,7 @@ import (
 //var iv = []byte("1234567890654321")
 
 //Decrypter
-func CBCDecrypter(data []byte) []byte {
+func CBCDecrypter(data, cbcKey []byte) []byte {
 	if len(data) < aes.BlockSize {
 		log.Error("data is too short.")
 		return []byte{}

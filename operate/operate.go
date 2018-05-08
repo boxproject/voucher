@@ -126,7 +126,7 @@ func (handler *OperateHandler) addKey(operate *config.Operate) {
 	publicKey := operate.PublicKey
 	log.Debug("addKey...")
 
-	if dDate := util.CBCDecrypter([]byte(publicKey)); len(dDate) == 0 { //解密
+	if dDate := util.CBCDecrypter([]byte(publicKey), util.GetAesKeyRandomFromDb(handler.db)); len(dDate) == 0 { //解密
 		log.Error("key decrypter failed.")
 		return
 	} else {
@@ -192,7 +192,6 @@ func (handler *OperateHandler) create(operate *config.Operate) {
 		log.Error("password get failed.")
 		return
 	}
-	log.Debug("passWord......", passWord)
 	if config.RealTimeStatus.ServerStatus == config.VOUCHER_STATUS_UNCREATED { //服务未创建
 		if d, err := trans.GetSecret(handler.db); err != nil {
 			log.Error("get secret error:%v", err)
@@ -394,12 +393,10 @@ func generateKey(db localdb.Database, reqType string, appNum int, appId string, 
 	apiMu.Lock()
 
 	batchCount := batchCountMap[reqType]
-	log.Debug("batchCount.......", batchCount)
 
 	if batchCount == appNum { //上次输入完整
 		batchCount = 0
 		delete(batchCountMap, reqType)
-		log.Debug("batchCountMap...", batchCountMap)
 		for k, _ := range authorizedMap { //删除授权信息
 			if strings.HasPrefix(k, reqType) {
 				delete(authorizedMap, k)
@@ -482,7 +479,7 @@ func getKey(keyAes, sign string, db localdb.Database, appId string) string {
 	if err := util.RsaSignVer([]byte(keyAes), []byte(sign), db, appId); err != nil {
 		log.Error("get key err: %s", err)
 	} else {
-		return string(util.CBCDecrypter([]byte(keyAes)))
+		return string(util.CBCDecrypter([]byte(keyAes), util.GetAesKeyRandomFromDb(db)))
 	}
 	return ""
 }
