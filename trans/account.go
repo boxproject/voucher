@@ -103,6 +103,7 @@ func CheckPrivateKey(db localdb.Database, args ...[]byte) bool {
 
 		d := sha3.NewKeccak512()
 		d.Write(v)
+		sort.Sort(IntSlice(args))
 		for _, b := range args {
 			d.Write(b)
 		}

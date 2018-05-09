@@ -279,7 +279,7 @@ func (handler *OperateHandler) start(operate *config.Operate) {
 		}
 		landStatus(handler.db, config.REQ_START)
 	} else {
-		log.Error("cannot deploy, status :%s", config.RealTimeStatus.Status)
+		log.Error("cannot start, status :%s", config.RealTimeStatus.Status)
 	}
 }
 

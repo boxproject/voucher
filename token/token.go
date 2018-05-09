@@ -23,7 +23,7 @@ func AddTokenMap(tokenInfoD *config.TokenInfo, db localdb.Database) (bool, int) 
 
 	tokenInfoS := EthAddrTokenMap[tokenInfoD.ContractAddr]
 	if tokenInfoS != nil { //存在
-
+		tokenInfoD.Category = tokenInfoS.Category
 	} else {
 
 		tokenLen := len(EthAddrTokenMap)
