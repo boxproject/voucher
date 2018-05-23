@@ -46,6 +46,7 @@ var (
 	Inited = InitStage{1}
 
 	DefPubEthGasLimit = 3000000 //默认gaslimit
+	DefAesKey = []byte("abcdefghijklmnop")
 )
 
 const (
@@ -114,9 +115,9 @@ const (
 )
 
 const (
-	CHAN_MAX_SIZE    = 100000 //chan 默认大小
-	POOL_SIZE        = 2      //账户池大小
-	NONCE_PLUS       = 1      //nonce值偏移值
+	CHAN_MAX_SIZE = 100000 //chan 默认大小
+	POOL_SIZE     = 2      //账户池大小
+	NONCE_PLUS    = 1      //nonce值偏移值
 )
 
 const (
@@ -175,8 +176,9 @@ const (
 //关键句状态
 const (
 	PASSWORD_STATUS_OK     = 0 //成功
-	PASSWORD_STATUS_FAILED = 1 //失败
-	PASSWORD_SYSTEM_FAILED = 2 //系统异常
+	PASSWORD_STATUS_FAILED = 1 //密码错误
+	PASSWORD_CODE_FAILED   = 2 //code不一致
+	PASSWORD_SYSTEM_FAILED = 3 //系统异常
 )
 
 const (
@@ -390,7 +392,7 @@ type Operate struct {
 	Hash         string
 	Password     string
 	ReqIpPort    string
-	Role         string
+	Code         string
 	PublicKey    string //加密后公钥
 	TokenName    string
 	Decimals     int64
@@ -412,7 +414,7 @@ type VoucherStatus struct {
 	Address         string           //账户地址
 	ContractAddress string           //合约地址
 	BtcAddress      string           //比特币地址
-	D               int              //随机数
+	D               string           //随机数
 	NodesAuthorized []NodeAuthorized //授权情况
 	KeyStoreStatus  []KeyStoreStatu  //公约添加状态
 	CoinStatus      []CoinStatu      //币种使用状态

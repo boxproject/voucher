@@ -19,8 +19,6 @@ import (
 	"crypto/ecdsa"
 	"errors"
 
-	"encoding/binary"
-
 	"crypto/md5"
 	log "github.com/alecthomas/log4go"
 	"github.com/awnumar/memguard"
@@ -42,14 +40,14 @@ import (
 
 var pk *memguard.LockedBuffer
 
-func GetSecret(db localdb.Database) (int, error) {
+func GetSecret(db localdb.Database) (string, error) {
 	v, err := db.Get(config.SECRET.Bytes())
 	if err != nil {
 		log.Error("get secret from db failed. casue: %v", err)
-		return 0, err
+		return "", err
 	}
-	d := binary.LittleEndian.Uint32(v)
-	return int(d), nil
+	//d := binary.LittleEndian.Uint32(v)
+	return string(v), nil
 }
 
 func RecoverPrivateKey(db localdb.Database, args ...[]byte) error {
@@ -90,7 +88,7 @@ func RecoverPrivateKey(db localdb.Database, args ...[]byte) error {
 
 //校验私钥hash
 func CheckPrivateKey(db localdb.Database, args ...[]byte) bool {
-
+	sort.Sort(IntSlice(args))
 	if pvhash, err := db.Get(config.PRIVATEKEYHASH.Bytes()); err != nil {
 		log.Error("CheckPrivateKey err: %s", err)
 		return false
@@ -193,7 +191,7 @@ func NewKeyedTransactor() *bind.TransactOpts {
 				}
 				return tx.WithSignature(signer, signature)
 			},
-			GasLimit: uint64(config.DefPubEthGasLimit),
+			//GasLimit: uint64(config.DefPubEthGasLimit),
 		}
 	}
 }

@@ -56,7 +56,6 @@ func AddTokenMap(tokenInfoD *config.TokenInfo, db localdb.Database) (bool, int) 
 						reportInfo.TokenList = append(reportInfo.TokenList, tokenInfo)
 					}
 				}
-				log.Debug("reportInfo----", reportInfo)
 				config.ReportedChan <- reportInfo
 			}
 			return true, len(EthAddrTokenMap)
@@ -87,7 +86,6 @@ func DelTokenMap(tokenInfoD *config.TokenInfo, db localdb.Database) (bool, int) 
 					reportInfo.TokenList = append(reportInfo.TokenList, tokenInfo)
 				}
 			}
-			log.Debug("reportInfo----", reportInfo)
 			config.ReportedChan <- reportInfo
 		}
 		return true, len(EthAddrTokenMap)
@@ -122,7 +120,6 @@ func TokenList(db localdb.Database) bool {
 				log.Error("landStatus err :%s", err)
 			}
 		}
-		log.Debug("reportInfo----", reportInfo)
 		config.ReportedChan <- reportInfo
 	}
 	return true

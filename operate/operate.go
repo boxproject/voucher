@@ -30,6 +30,7 @@ import (
 
 //prefix+host ->pass
 var passMap map[string]string = make(map[string]string)
+var codeMap map[string]string = make(map[string]string)
 
 //prefix+host ->role
 //var roleMap map[string]string = make(map[string]string)
@@ -149,12 +150,11 @@ func (handler *OperateHandler) hashAllow(operate *config.Operate) {
 		return
 	}
 	if config.RealTimeStatus.ServerStatus == config.VOUCHER_STATUS_STATED { //服务已启动
-		b := checkKey(handler.db, config.REQ_HASH, handler.cfg.Secret.AppNum, operate.AppId, passWord, true)
-		if b {
-			config.RealTimeStatus.Status = config.PASSWORD_STATUS_OK
-		} else {
+		b, passWordStatus := checkKey(handler.db, config.REQ_HASH, handler.cfg.Secret.AppNum, operate.AppId, passWord, true)
+		config.RealTimeStatus.Status = passWordStatus
+		if !b {
 			log.Info("check failed")
-			config.RealTimeStatus.Status = config.PASSWORD_STATUS_FAILED
+			config.RealTimeStatus.Status = passWordStatus
 		}
 		landStatus(handler.db, config.REQ_HASH)
 	} else {
@@ -171,10 +171,9 @@ func (handler *OperateHandler) hashDisAllow(operate *config.Operate) {
 		return
 	}
 	if config.RealTimeStatus.ServerStatus == config.VOUCHER_STATUS_STATED { //服务已启动
-		b := checkKey(handler.db, config.REQ_HASH, handler.cfg.Secret.AppNum, operate.AppId, passWord, false)
-		if b {
-			config.RealTimeStatus.Status = config.PASSWORD_STATUS_OK
-		} else {
+		b, passWordStatus := checkKey(handler.db, config.REQ_HASH, handler.cfg.Secret.AppNum, operate.AppId, passWord, false)
+		config.RealTimeStatus.Status = passWordStatus
+		if !b {
 			log.Info("check failed")
 			config.RealTimeStatus.Status = config.PASSWORD_STATUS_FAILED
 		}
@@ -197,15 +196,13 @@ func (handler *OperateHandler) create(operate *config.Operate) {
 			log.Error("get secret error:%v", err)
 		} else {
 			config.RealTimeStatus.D = d
-			b := generateKey(handler.db, config.REQ_CREATE, handler.cfg.Secret.AppNum, operate.AppId, passWord, true)
+			b, passWordStatus := generateKey(handler.db, config.REQ_CREATE, handler.cfg.Secret.AppNum, operate.AppId, passWord, operate.Code, true)
+			config.RealTimeStatus.Status = passWordStatus
 			if b {
-				config.RealTimeStatus.Status = config.PASSWORD_STATUS_OK
 				config.RealTimeStatus.ServerStatus = config.VOUCHER_STATUS_CREATED
 				config.RealTimeStatus.Address = trans.PrivateKeyToHex(handler.db)
-
 				log.Debug("privateKey generated....")
 			} else {
-				config.RealTimeStatus.Status = config.PASSWORD_STATUS_FAILED
 				log.Info("create failed: %s")
 			}
 			landStatus(handler.db, config.REQ_CREATE)
@@ -222,26 +219,21 @@ func (handler *OperateHandler) deploy(operate *config.Operate) {
 		log.Error("password get failed.")
 		return
 	}
-	//if config.RealTimeStatus.ServerStatus == config.VOUCHER_STATUS_CREATED { //服务未创建
-	b := checkKey(handler.db, config.REQ_DEPLOY, handler.cfg.Secret.AppNum, operate.AppId, passWord, true)
+	b, passWordStatus := checkKey(handler.db, config.REQ_DEPLOY, handler.cfg.Secret.AppNum, operate.AppId, passWord, true)
+	config.RealTimeStatus.Status = passWordStatus
 	if b {
 		if contractAddress, txHash, _, err := handler.ethHander.DeployBank(); err != nil { //发布合约
 			log.Error("deploy failed error:", err)
 		} else {
-			config.RealTimeStatus.Status = config.PASSWORD_STATUS_OK
 			config.RealTimeStatus.ServerStatus = config.VOUCHER_STATUS_DEPLOYED
 			config.RealTimeStatus.ContractAddress = contractAddress.Hex()
 
 			log.Info("deploy success contractAddress:%v, txHash:%v", contractAddress.Hash().Hex(), txHash.Hash().Hex())
 		}
 	} else {
-		config.RealTimeStatus.Status = config.PASSWORD_STATUS_FAILED
 		log.Info("deploy failed!")
 	}
 	landStatus(handler.db, config.REQ_DEPLOY)
-	//} else {
-	//	log.Error("cannot deploy, status :%s", config.RealTimeStatus.Status)
-	//}
 }
 
 func (handler *OperateHandler) start(operate *config.Operate) {
@@ -252,17 +244,17 @@ func (handler *OperateHandler) start(operate *config.Operate) {
 		return
 	}
 	if config.RealTimeStatus.ServerStatus == config.VOUCHER_STATUS_DEPLOYED || config.RealTimeStatus.ServerStatus == config.VOUCHER_STATUS_PAUSED { //服务已发布或停止
-		b := checkKey(handler.db, config.REQ_START, handler.cfg.Secret.AppNum, operate.AppId, passWord, true)
+		b, passWordStatus := checkKey(handler.db, config.REQ_START, handler.cfg.Secret.AppNum, operate.AppId, passWord, true)
+		config.RealTimeStatus.Status = passWordStatus
 		if b {
 			if err := handler.ethHander.Start(); err == verrors.NoDataErr {
 			} else if err != nil {
 				config.RealTimeStatus.Status = config.PASSWORD_SYSTEM_FAILED
 				log.Error("start err:%v", err)
 			} else {
-				config.RealTimeStatus.Status = config.PASSWORD_STATUS_OK
 				config.RealTimeStatus.ServerStatus = config.VOUCHER_STATUS_STATED
 				for _, coinStatu := range config.RealTimeStatus.CoinStatus {
-					if coinStatu.Category == config.CATEGORY_BTC {
+					if coinStatu.Category == config.CATEGORY_BTC && coinStatu.Used == true {
 						if err := handler.ethHander.BtcStart(); err != nil {
 							log.Error("btc start failed. err: %s", err)
 						} else {
@@ -274,7 +266,6 @@ func (handler *OperateHandler) start(operate *config.Operate) {
 				log.Info("start success!")
 			}
 		} else {
-			config.RealTimeStatus.Status = config.PASSWORD_STATUS_FAILED
 			log.Info("start failed.")
 		}
 		landStatus(handler.db, config.REQ_START)
@@ -313,10 +304,15 @@ func (handler *OperateHandler) hashList(operate *config.Operate) {
 
 func (handler *OperateHandler) addToken(operate *config.Operate) {
 	log.Debug("addToken...")
+	if !checkSign(operate.ContractAddr, operate.Sign, operate.AppId, handler.db) {
+		log.Info("token add sign check err")
+		return
+	}
 	tokenInfo := &config.TokenInfo{TokenName: operate.TokenName, Decimals: operate.Decimals, ContractAddr: operate.ContractAddr}
 
 	if b, l := token.AddTokenMap(tokenInfo, handler.db); !b {
 		log.Info("add token failed.")
+		return
 	} else {
 		config.RealTimeStatus.TokenCount = l
 	}
@@ -325,6 +321,10 @@ func (handler *OperateHandler) addToken(operate *config.Operate) {
 
 func (handler *OperateHandler) delToken(operate *config.Operate) {
 	log.Debug("delToken...")
+	if !checkSign(operate.ContractAddr, operate.Sign, operate.AppId, handler.db) {
+		log.Info("token add sign check err")
+		return
+	}
 	tokenInfo := &config.TokenInfo{TokenName: operate.TokenName, Decimals: operate.Decimals, ContractAddr: operate.ContractAddr}
 
 	if b, l := token.DelTokenMap(tokenInfo, handler.db); !b {
@@ -387,7 +387,7 @@ func (handler *OperateHandler) coin(operate *config.Operate) {
 }
 
 //key generate
-func generateKey(db localdb.Database, reqType string, appNum int, appId string, pass string, opinion bool) bool {
+func generateKey(db localdb.Database, reqType string, appNum int, appId string, pass string, code string, opinion bool) (bool, int) {
 
 	defer apiMu.Unlock()
 	apiMu.Lock()
@@ -411,7 +411,12 @@ func generateKey(db localdb.Database, reqType string, appNum int, appId string, 
 
 	batchCount++
 	batchCountMap[reqType] = batchCount
+
 	passMap[reqType+appId] = pass
+	if reqType == config.REQ_CREATE { //创建
+		codeMap[reqType+appId] = code
+	}
+
 	authorizedMap[reqType+appId] = opinion
 
 	if batchCount < appNum { //未输入完整密码
@@ -421,7 +426,7 @@ func generateKey(db localdb.Database, reqType string, appNum int, appId string, 
 			for k, b := range authorizedMap {
 				if strings.HasPrefix(k, reqType) {
 					if !b { //有一个拒绝即失效
-						return false
+						return false, config.PASSWORD_STATUS_OK
 					}
 				}
 			}
@@ -437,21 +442,39 @@ func generateKey(db localdb.Database, reqType string, appNum int, appId string, 
 		}
 
 		if reqType == config.REQ_CREATE { //创建
+			firstCode := ""
+			for _, code := range codeMap {
+				if firstCode == "" {
+					firstCode = code
+				} else if firstCode != code {
+					for k, _ := range codeMap { //删除
+						if strings.HasPrefix(k, reqType) {
+							delete(codeMap, k)
+						}
+					}
+					return false, config.PASSWORD_CODE_FAILED
+				}
+			}
+
 			if !trans.ExistPrivateKeyHash(db) { //不存在
 				if trans.RecoverPrivateKey(db, passBytes...) == nil {
-					return true
+					return true, config.PASSWORD_STATUS_FAILED
 				}
 			}
 		} else { //校验
-			return trans.CheckPrivateKey(db, passBytes...)
+			if trans.CheckPrivateKey(db, passBytes...) {
+				return true, config.PASSWORD_STATUS_OK
+			} else {
+				return false, config.PASSWORD_STATUS_FAILED
+			}
 		}
 	}
-	return false
+	return false, config.PASSWORD_STATUS_FAILED
 }
 
 //校验key
-func checkKey(db localdb.Database, reqType string, appNum int, appId string, pass string, opinion bool) bool {
-	return generateKey(db, reqType, appNum, appId, pass, opinion)
+func checkKey(db localdb.Database, reqType string, appNum int, appId string, pass string, opinion bool) (bool, int) {
+	return generateKey(db, reqType, appNum, appId, pass, "", opinion)
 }
 
 //状态持久化
@@ -475,11 +498,19 @@ func landStatus(db localdb.Database, reqType string) {
 	}
 }
 
-func getKey(keyAes, sign string, db localdb.Database, appId string) string {
-	if err := util.RsaSignVer([]byte(keyAes), []byte(sign), db, appId); err != nil {
+func getKey(data, sign string, db localdb.Database, appId string) string {
+	if err := util.RsaSignVer([]byte(data), []byte(sign), db, appId); err != nil {
 		log.Error("get key err: %s", err)
 	} else {
-		return string(util.CBCDecrypter([]byte(keyAes), util.GetAesKeyRandomFromDb(db)))
+		return string(util.CBCDecrypter([]byte(data), util.GetAesKeyRandomFromDb(db)))
 	}
 	return ""
+}
+
+func checkSign(flow, sign, appId string, db localdb.Database) bool {
+	if err := util.RsaSignVer([]byte(flow), []byte(sign), db, appId); err != nil {
+		log.Info("check sign failed.")
+		return false
+	}
+	return true
 }

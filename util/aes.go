@@ -8,8 +8,6 @@ import (
 	log "github.com/alecthomas/log4go"
 )
 
-//var iv = []byte("1234567890654321")
-
 //Decrypter
 func CBCDecrypter(data, cbcKey []byte) []byte {
 	if len(data) < aes.BlockSize {
@@ -25,11 +23,9 @@ func CBCDecrypter(data, cbcKey []byte) []byte {
 	iv := make([]byte, aes.BlockSize)
 	copy(iv, deDataWithIv[:aes.BlockSize])
 
-	key := make([]byte, len([]byte(cbcKey)))
-	copy(key, []byte(cbcKey))
-	c, err := aes.NewCipher(key)
+	c, err := aes.NewCipher(cbcKey)
 	if err != nil {
-		log.Error("NewCipher[%s] err: %s", key, err)
+		log.Error("NewCipher[%s] err: %s", cbcKey, err)
 	}
 	decrypter := cipher.NewCBCDecrypter(c, iv)
 

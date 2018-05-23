@@ -41,7 +41,7 @@ type Config struct {
 	CertHTTPConfig CertHTTPConfig     `toml:"service"`
 	APIConfig      APIConfig          `toml:"api"`
 	EthereumConfig EthereumConfig     `toml:"ethereum"`
-	BitcoinConfig  BitcoinConfig      `toml:"bitcoin"` //add by john.yang
+	BitcoinConfig  BitcoinConfig      `toml:"bitcoin"`
 }
 
 func (c *Config) String() string {

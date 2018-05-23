@@ -7,6 +7,7 @@ import (
 	//"math/big"
 	"bytes"
 	"crypto/aes"
+	//"crypto/rand"
 	"github.com/boxproject/voucher/config"
 	"github.com/boxproject/voucher/localdb"
 	"math/big"
@@ -17,6 +18,7 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -78,17 +80,13 @@ func GetConfigFilePath(configPath, defaultFileName string) string {
 }
 
 //file
-var noRWMutex sync.RWMutex
+var NoRWMutex sync.RWMutex
 
 func WriteNumberToFile(filePath string, blkNumber *big.Int) error {
-	noRWMutex.Lock()
-	defer noRWMutex.Unlock()
 	return ioutil.WriteFile(filePath, []byte(blkNumber.String()), 0755)
 }
 
 func ReadNumberFromFile(filePath string) (*big.Int, error) {
-	noRWMutex.Lock()
-	defer noRWMutex.Unlock()
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		log.Debug("file not found, %v", err)
 		return big.NewInt(0), nil
@@ -133,13 +131,6 @@ func ReadNumberFromFile(filePath string) (*big.Int, error) {
 //	return nil
 //}
 
-// Intn returns, as an int, a non-negative pseudo-random number in [0,n).
-// It panics if n <= 0.
-func GetIntnRandom(n int) int {
-	r := rand.New(rand.NewSource(time.Now().UnixNano())) //添加时间生成随机数
-	return r.Intn(n)
-}
-
 func GetCurrentIp() string {
 	addrSlice, err := net.InterfaceAddrs()
 	if nil != err {
@@ -173,11 +164,15 @@ func GetCurrentIp() string {
 func GetAesKeyRandomFromDb(db localdb.Database) []byte {
 	if aesKeyBytes, err := db.Get([]byte(config.APP_KEY_PRIFIX)); err != nil {
 		log.Info("get app key failed. err : %s", err)
-		r := rand.New(rand.NewSource(time.Now().UnixNano())) //添加时间生成随机数
 		cbcKey := make([]byte, aes.BlockSize)
-		copy(cbcKey, []byte(string(r.Intn(100000000000000))))
+
+		r := rand.New(rand.NewSource(time.Now().UnixNano())) //添加时间生成随机数
+		ri := r.Uint64()
+		rstr := strconv.FormatUint(ri, 16)
+		copy(cbcKey, []byte(rstr))
 		if err = db.Put([]byte(config.APP_KEY_PRIFIX), cbcKey); err != nil {
 			log.Debug("land aes to db err: %s", err)
+			return config.DefAesKey
 		}
 		return cbcKey
 	} else {

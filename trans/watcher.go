@@ -105,6 +105,7 @@ func (hc *HandlerContext) addListener(handlers ...EventHandler) {
 type EthHandler struct {
 	client         *ethclient.Client
 	conf           *HandlerContext
+	ethQuitCh      chan struct{}
 	quitCh         chan struct{}
 	events         map[common.Hash]EventHandler
 	accountHandler *AccountHandler
@@ -131,9 +132,9 @@ func (w *EthHandler) loadAddr() error {
 			newDisallowHandler(w.conf),
 			newWithdrawHandler(w.conf),
 			newERC20Handler(w.conf, w.client))
-		//newWalletHandler(w.conf))
 	}
-	w.quitCh = make(chan struct{})
+	w.quitCh = make(chan struct{}, 1)
+	w.ethQuitCh = make(chan struct{}, 1)
 	return nil
 }
 
@@ -189,23 +190,17 @@ func (w *EthHandler) reloadBlock() error {
 	util.WriteNumberToFile(w.conf.NonceFilePath, big.NewInt(int64(nonce)))
 
 	// 获取向前推N个区块的big.Int值
+	checkBefore := w.conf.DelayedBlocks
 	log.Debug("before:: max blkNumber: %s, cursor blkNumber: %s", maxBlkNumber.String(), cursorBlkNumber.String())
 
-	//for maxBlkNumber.Cmp(cursorBlkNumber) > 0 {
-	//	if err = w.checkBlock(cursorBlkNumber); err != nil {
-	//		return err
-	//	}
-	//	//cursorBlkNumber = new(big.Int).Add(cursorBlkNumber, big.NewInt(1))
-	//}
-
-	if maxBlkNumber.Cmp(cursorBlkNumber) > 0 {
-		if err = w.checkBlock(maxBlkNumber); err != nil {
+	for maxBlkNumber.Cmp(cursorBlkNumber) >= int(checkBefore.Int64()) {
+		if err = w.checkBlock(new(big.Int).Add(cursorBlkNumber, checkBefore)); err != nil {
 			return err
 		}
-		//cursorBlkNumber = new(big.Int).Add(cursorBlkNumber, big.NewInt(1))
+		// 记录下当前的 blocknumber 供恢复用
+		util.WriteNumberToFile(w.conf.BlockNoFilePath, cursorBlkNumber)
+		cursorBlkNumber = new(big.Int).Add(cursorBlkNumber, big.NewInt(1))
 	}
-	// 记录下当前的 blocknumber 供恢复用
-	util.WriteNumberToFile(w.conf.BlockNoFilePath, maxBlkNumber)
 
 	log.Debug("after:: cursor blkNumber: %s", cursorBlkNumber.String())
 	return nil
@@ -219,7 +214,7 @@ func (w *EthHandler) ethChainHandler() {
 	loop := true
 	for loop {
 		select {
-		case <-w.quitCh:
+		case <-w.ethQuitCh:
 			log.Info("PriEthHandler::SendMessage thread exitCh!")
 			loop = false
 		case data, ok := <-config.Ecr20RecordChan:
@@ -243,6 +238,9 @@ func (w *EthHandler) ethChainHandler() {
 
 //上公链操作-同意
 func (w *EthHandler) ethAllowHandler(record *config.Ecr20Record) error {
+	log.Debug("ethAllowHandler...hash:%v", record.Hash.Hex())
+	util.NoRWMutex.Lock()
+	defer util.NoRWMutex.Unlock()
 	bank, err := NewBank(w.conf.ContractAddress, w.client)
 
 	if err != nil {
@@ -271,6 +269,9 @@ func (w *EthHandler) ethAllowHandler(record *config.Ecr20Record) error {
 
 //上公链操作-禁用
 func (w *EthHandler) ethDisAllowHandler(record *config.Ecr20Record) error {
+	log.Debug("ethDisAllowHandler...hash:%v", record.Hash.Hex())
+	util.NoRWMutex.Lock()
+	defer util.NoRWMutex.Unlock()
 	bank, err := NewBank(w.conf.ContractAddress, w.client)
 
 	if err != nil {
@@ -298,6 +299,9 @@ func (w *EthHandler) ethDisAllowHandler(record *config.Ecr20Record) error {
 
 //上公链操作-转账
 func (w *EthHandler) ethTransferHandler(record *config.Ecr20Record) error {
+	log.Debug("ethTransferHandler...hash:%v, wdHash:%v", record.Hash.Hex(), record.WdHash.Hex())
+	util.NoRWMutex.Lock()
+	defer util.NoRWMutex.Unlock()
 	bank, err := NewBank(w.conf.ContractAddress, w.client)
 
 	if err != nil {
@@ -317,16 +321,17 @@ func (w *EthHandler) ethTransferHandler(record *config.Ecr20Record) error {
 		tx, err := bank.Withdraw(opts, record.To, record.Amount, record.Hash)
 		if err != nil {
 			log.Error("withDraw error:%s", err)
-		}
-
-		log.Info("eth transfer :%v", tx.Hash().Hex())
-		log.Info("record.WdHash :%v", record.WdHash.Hex())
-
-		if err := w.conf.Db.Put([]byte(config.WITHDRAW_TX_PRIFIX+tx.Hash().Hex()), []byte(record.WdHash.Hex())); err != nil {
-			log.Error("CheckPrivateKey err: %s", err)
 		} else {
+			log.Info("eth transfer tx:%v, wd:%v, to:%v", tx.Hash().Hex(), record.WdHash.Hex(), record.To.Hex())
 			nonce = nonce.Add(nonce, big.NewInt(config.NONCE_PLUS))
-			config.ReportedChan <- &config.GrpcStream{Type: config.GRPC_WITHDRAW_TX_WEB, WdHash: record.WdHash, TxHash: tx.Hash().Hex()}
+			util.WriteNumberToFile(w.conf.NonceFilePath, nonce)
+
+			if err := w.conf.Db.Put([]byte(config.WITHDRAW_TX_PRIFIX+tx.Hash().Hex()), []byte(record.WdHash.Hex())); err != nil {
+				log.Error("CheckPrivateKey err: %s", err)
+			} else {
+
+				config.ReportedChan <- &config.GrpcStream{Type: config.GRPC_WITHDRAW_TX_WEB, WdHash: record.WdHash, TxHash: tx.Hash().Hex()}
+			}
 		}
 	} else { //eth代币
 		if token := token.GetTokenByCategory(record.Category.Int64()); token != nil {
@@ -334,12 +339,12 @@ func (w *EthHandler) ethTransferHandler(record *config.Ecr20Record) error {
 			if err != nil {
 				log.Error("withDraw error:%s", err)
 			} else {
-				log.Info("eth transfer :%v", tx.Hash().Hex())
-
+				log.Info("token transfer tx:%v, wd:%v, to:%v", tx.Hash().Hex(), record.WdHash.Hex(), record.To.Hex())
+				nonce = nonce.Add(nonce, big.NewInt(config.NONCE_PLUS))
+				util.WriteNumberToFile(w.conf.NonceFilePath, nonce)
 				if err := w.conf.Db.Put([]byte(config.WITHDRAW_TX_PRIFIX+tx.Hash().Hex()), []byte(record.WdHash.Hex())); err != nil {
 					log.Error("CheckPrivateKey err: %s", err)
 				} else {
-					nonce = nonce.Add(nonce, big.NewInt(config.NONCE_PLUS))
 					config.ReportedChan <- &config.GrpcStream{Type: config.GRPC_WITHDRAW_TX_WEB, WdHash: record.WdHash, TxHash: tx.Hash().Hex()}
 				}
 			}
@@ -349,7 +354,6 @@ func (w *EthHandler) ethTransferHandler(record *config.Ecr20Record) error {
 		}
 	}
 
-	util.WriteNumberToFile(w.conf.NonceFilePath, nonce)
 	return nil
 }
 
@@ -380,13 +384,15 @@ func (w *EthHandler) listen() {
 
 func (w *EthHandler) Stop() {
 	log.Info("close server...")
-
 	if w.quitCh != nil {
 		w.quitCh <- struct{}{}
 	}
-	if w.accountHandler.quitChannel != nil {
-		w.accountHandler.Stop() //停止生成账号
+	if w.ethQuitCh != nil {
+		w.ethQuitCh <- struct{}{}
 	}
+	//if w.accountHandler.quitChannel != nil {
+	//	w.accountHandler.Stop() //停止生成账号
+	//}
 
 	//w.BtcHandler.Stop()
 	log.Info("close server OK")
@@ -415,24 +421,16 @@ func (w *EthHandler) recv(sid ethereum.Subscription, ch <-chan *types.Header) er
 }
 
 func (w *EthHandler) checkBlock(blkNumber *big.Int) error {
-	checkPoint, err := util.ReadNumberFromFile(w.conf.BlockNoFilePath) //block cfg
-	if err != nil {
-		return err
-	}
+	checkPoint := new(big.Int).Sub(blkNumber, w.conf.DelayedBlocks)
 
-	if checkPoint.Cmp(blkNumber) >= 0 || checkPoint.Cmp(big.NewInt(0)) <= 0 { // 文件中记录点有误
-		checkPoint = blkNumber
-	} else {
-		checkPoint = checkPoint.Add(checkPoint, big.NewInt(1))
-	}
-
-	log.Debug("[HEADER] FromBlock : %s, blkNumber: %s", checkPoint.String(), blkNumber.String())
+	//log.Debug("[HEADER] FromBlock : %s, blkNumber: %s", checkPoint.String(), blkNumber.String())
+	log.Debug("[HEADER] blkNumber: %s, checkpoint: %s", blkNumber.String(), checkPoint.String())
 
 	if logs, err := w.client.FilterLogs(
 		context.Background(),
 		ethereum.FilterQuery{
 			FromBlock: checkPoint,
-			ToBlock:   blkNumber,
+			ToBlock:   checkPoint,
 		}); err != nil {
 		log.Debug("FilterLogs :%s", err)
 		return err
@@ -446,12 +444,11 @@ func (w *EthHandler) checkBlock(blkNumber *big.Int) error {
 					continue
 				}
 				if err = handler.Scan(&enventLog); err != nil {
-					util.WriteNumberToFile(w.conf.BlockNoFilePath, big.NewInt(int64(enventLog.BlockNumber)))
 					return err
 				}
 			}
 		}
-		util.WriteNumberToFile(w.conf.BlockNoFilePath, blkNumber)
+		util.WriteNumberToFile(w.conf.BlockNoFilePath, checkPoint)
 	}
 
 	return nil
@@ -471,10 +468,8 @@ func NewEthHandler(cfg *config.Config, db localdb.Database) (*EthHandler, error)
 		NonceFilePath:   cfg.EthereumConfig.NonceFilePath,
 	}
 	w := &EthHandler{conf: conf, quitCh: make(chan struct{}, 1)}
-	// add by john.yang ---------------begin
 	w.BtcHandler, _ = NewBtcHandler(cfg, db)
-	// add by john.yang ---------------end
-	w.accountHandler = NewAccountHandler(db, w, cfg.EthereumConfig.AccountPoolSize, cfg.EthereumConfig.NonceFilePath)
+	//w.accountHandler = NewAccountHandler(db, w, cfg.EthereumConfig.AccountPoolSize, cfg.EthereumConfig.NonceFilePath)
 	return w, nil
 }
 
