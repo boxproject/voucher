@@ -25,9 +25,10 @@ import (
 
 //BTC db 前缀
 const (
-	BTC_TXID   = "BTC_TXID_"
-	BTC_TXID_0 = BTC_TXID + "0_"
-	BTC_TXID_1 = BTC_TXID + "1_"
+	BTC_LOG_LABLE = "[BTC]"
+	BTC_TXID      = "BTC_TXID_"
+	BTC_TXID_0    = BTC_TXID + "0_"
+	BTC_TXID_1    = BTC_TXID + "1_"
 )
 
 const (
@@ -49,7 +50,6 @@ type BTCTxidInfo struct {
 type BtcHandler struct {
 	db        localdb.Database
 	btcConf   *config.BitcoinConfig
-	quitCh    chan struct{}
 	clientCfg *rpcclient.ConnConfig
 	client    *rpcclient.Client
 	accHandle *AccountHandlerBtc
@@ -71,15 +71,23 @@ func NewBtcHandler(cfg *config.Config, db localdb.Database) (*BtcHandler, error)
 		db:        db,
 		btcConf:   btcConf,
 		clientCfg: clientDfg,
-		quitCh:    make(chan struct{}, 1),
 		isStart:   false}
 	btcHandler.accHandle = NewAccountHandlerBtc(db, btcHandler)
 
 	return btcHandler, nil
 }
 
+func (w *BtcHandler) Status() (isWork bool) {
+	if w.isStart && w.accHandle.isInited {
+		isWork = true
+	} else {
+		isWork = false
+	}
+	return isWork
+}
 func (w *BtcHandler) Start() (err error) {
 	if w.isStart {
+		log.Info("bitcoin started")
 		return nil
 	}
 	log.Info("bitcoin rpc connect...")
@@ -253,13 +261,6 @@ func (w *BtcHandler) btcChainHandler() {
 	w.isStart = true
 	for w.isStart {
 		select {
-		case _, ok := <-w.quitCh:
-			if ok {
-				log.Info("PriEthHandler::SendMessage thread exitCh!")
-			} else {
-				log.Info("quit chan closed...")
-			}
-			w.isStart = false
 		case data, ok := <-config.BtcRecordChan: //提币交易
 			if ok {
 				log.Debug("BtcRecordChannel :%s", data)
@@ -376,6 +377,8 @@ func (w *BtcHandler) btcChainHandler() {
 				}
 			}
 			isScaning = false
+		default:
+
 		}
 	}
 
@@ -544,16 +547,15 @@ func (w *BtcHandler) btcAddressImport(address btcutil.Address) bool {
 }
 
 func (w *BtcHandler) Stop() {
+	//log.Info("stop bitcoin server")
+	//stop account
 	w.accHandle.Stop()
 
-	if w.quitCh != nil {
-		w.quitCh <- struct{}{}
-	}
+	w.isStart = false
 	if w.client != nil {
-		log.Info("close bitcoin rpc client...")
 		w.client.Shutdown()
-		log.Info("close bitcoin rpc client OK")
 	}
+	log.Info("bitcoin server Stopped")
 }
 
 /*
@@ -561,7 +563,7 @@ func (w *BtcHandler) Stop() {
 */
 type AccountHandlerBtc struct {
 	db          localdb.Database
-	quitChannel chan int
+	//quitChannel chan int
 	isInited    bool
 
 	handler      *BtcHandler
@@ -577,14 +579,13 @@ func NewAccountHandlerBtc(db localdb.Database, handler *BtcHandler) *AccountHand
 		isInited:     false,
 		db:           db,
 		handler:      handler,
-		quitChannel:  make(chan int, 1),
+		//quitChannel:  make(chan int, 1),
 		UncfmTxidMap: make(map[string]*BTCTxidInfo),
 	}
 }
 
 func (a *AccountHandlerBtc) Init() error {
 	log.Debug("AccountHandlerBtc init.......")
-
 	if accStr, err := GetBtcPubKey(a.db); err != nil {
 		log.Error(err)
 		return err
@@ -620,33 +621,25 @@ func (a *AccountHandlerBtc) Init() error {
 		}
 		a.uncfmMu.Unlock()
 	}
-
-	timerScanAddImp := time.NewTicker(time.Second * 5)
-	isScaning := false
 	go func() {
+		timerScanAddImp := time.NewTicker(time.Second * 5)
+		isScaning := false
 		for a.isInited == false {
 			select {
-			case _, ok := <-a.quitChannel:
-				if ok {
-					log.Info("AccountHandlerBtc::SendMessage thread exitCh!")
-				} else {
-					log.Info("quitChannel closed...")
-				}
-				a.isInited = true
-			case <-timerScanAddImp.C:
-				if isScaning == true {
-					continue
-				}
-				isScaning = true
-				//地址导入
-				if a.handler.btcAddressImport(a.Account) {
-					a.isInited = true
-				}
-				isScaning = false
+				case <-timerScanAddImp.C:
+					if isScaning == true {
+						continue
+					}
+					isScaning = true
+					//地址导入
+					if a.handler.btcAddressImport(a.Account) {
+						a.isInited = true
+						log.Info("[BTC]ALL ACCOUNT IS IMPORTED")
+					}
+					isScaning = false
+				default:
 			}
 		}
-		//for test
-		//config.BtcRecordChan <- &config.BtcRecord{Type: config.BTC_TYPE_APPROVE, WdHash: common.BytesToHash([]byte(time.Now().String())), Handlefee: big.NewInt(1000), To: "mv7t326zN5K1oRWUV4HR1fLw1QpHVEZEN1", Amount: big.NewInt(100000)}
 	}()
 
 	log.Info("AccountHandlerBtc init finished")
@@ -654,17 +647,19 @@ func (a *AccountHandlerBtc) Init() error {
 }
 
 func (a *AccountHandlerBtc) Stop() {
-	if a.quitChannel != nil {
-		a.quitChannel <- 0
-	}
+	a.isInited = false
 }
 
 func Btc_test(cfg *config.Config, db localdb.Database) (*BtcHandler, error) {
 	/*bitcoin test ----begin
-	btcHd,_ :=trans.Btc_test(cfg,db)
-	defer btcHd.Stop()
+	btc,err  := trans.Btc_test(cfg, db )
+	if err != nil {
+		logger.Error("run Btc_test failed. cause: %v", err)
+		return err
+	}
+	defer btc.Stop()
 	<-quitCh
-	return nil
+	return err
 	bitcoin test ----end*/
 
 	RecoverPrivateKey(db, []byte("dhjflaksjhdfkasdfkahskd"))
