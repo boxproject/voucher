@@ -30,6 +30,41 @@ On the hardware side, deploying a BOX system requires at least 3(2n+1) cloud ser
 
 **The BOX code has been uploaded to GitHub, the largest technology open source community in the world, and it is necessary to build a healthier and safer industry environment together with the you.** Any individual or enterprise can use and deploy the system free of charge. In order to stimulate the first contributors of the BOX 0.1.0 version, the BOX team launched the “BOX Super Partner” program. Up to now, more than 30 organizations have signed letters of intent with the BOX Foundation. In the future, the BOX team will focus on community building and system scalability, and work with many organizations to build a healthier and safer industry environment. BOX's open source code on github has multiple repositories providing a complete set of deployable solutions. Including agent - private key APP management server, box-Authorizer - private key APP client, boxguard - signature machine daemon, voucher - access layer, companion - private chain side companion program, box-Staff-Manager - employee APP client End, box-appServer - Employee APP Server.
 
+## Main functionalites
+
+There are 5 main functionalites for this voucher progam:
+
+1. Communicate with proxy server on private chain
+2. Upload realtime status
+3. Receive request from private key app, complete offline signature and publish smart contract etc.
+4. Submitted data will only be confirmed when transctions or approval flows initialized from private blockchain, signed and verified using RSA.
+5. Monitor event log of Ethereum, confirm approval flows, topup and withdrawl and transfer result to proxy server.
+
+**How to use:**
+
+1. Initialization. 
+Use the following command for the first time run
+```sh
+make build
+```
+Otherwise, use this command
+```sh
+make rebuild
+```
+Note: build command will clear all data.
+
+2. Update parameters (address to associated program, port, public key and certificate) in config.json respectively. 
+3. Update rpc api address to config.json
+4. Run program
+
+
+**Run command in cli：**
+
+```bash
+➜ ./voucher
+```
+
+
 # BOX产品介绍
 
 **机构掀起数字资产投资狂潮。** 全球 VC 数字资产投资规模由2012年2百万美元飙升至目前34亿美元，期间增幅达1672.5倍。其中，VC数字资产投资累计融资规模由2012年3起激增至2018年182起。在资产数字化的大浪潮下，预计未来将有更多的机构参与进来。
