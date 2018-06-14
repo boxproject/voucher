@@ -29,14 +29,19 @@ type (
 
 var (
 	// 初始状态
+	// Init state
 	INIT = MetaKey{0}
 	// 服务器端的d
+	// Server side secret key
 	SECRET = MetaKey{1}
 	// 一次性密码,计数
+	// One-time password
 	PASS = MetaKey{2}
 	// 当前区块号
+	// Current block
 	BLKNUMBER = MetaKey{3}
 	// 公链上的智能合约地址
+	// Address on public chain
 	BANKADDRESS = MetaKey{5}
 
 	PRIVATEKEYHASH = MetaKey{6}
