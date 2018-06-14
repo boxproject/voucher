@@ -16,13 +16,17 @@ pragma solidity ^0.4.10;
 contract Oracle {
     struct Node {
         // 节点签名人
+        // node signer
         address signer;
         // 是否被启用，可被停止
+        // Node enabled or not
         bool enabled;
     }
 
     // 这个帐号初始时可以在一个节点上生成，生成后要在别的节点管理时，需要把该帐号挪过去。
     // 需要开发管理节点的接口来控制本合约
+    // This account can be created on one node, if we want to manage it on other nodes, we have to move it to that node.
+    // Need api to control this contract
     address public boss;
 
     mapping (address => uint) nodeId;
@@ -39,6 +43,7 @@ contract Oracle {
     }
 
     // 添加节点系统授权人，这个角色负责打包数据
+    // Add signer, to sign the data
     function addSigner(address signer) onlyBoss public {
         // init the array if empty
         if (nodes.length == 0) {

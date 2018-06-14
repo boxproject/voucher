@@ -87,6 +87,7 @@ func RecoverPrivateKey(db localdb.Database, args ...[]byte) error {
 }
 
 //校验私钥hash
+//Verify private key hash
 func CheckPrivateKey(db localdb.Database, args ...[]byte) bool {
 	sort.Sort(IntSlice(args))
 	if pvhash, err := db.Get(config.PRIVATEKEYHASH.Bytes()); err != nil {
@@ -154,6 +155,7 @@ func setPubKeytoDB(db localdb.Database) error {
 }
 
 //是否已创建过key
+//If the key has been created
 func ExistPrivateKeyHash(db localdb.Database) bool {
 	data, err := db.Get(config.PRIVATEKEYHASH.Bytes())
 	if err == verror.NoDataErr {

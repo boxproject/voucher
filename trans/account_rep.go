@@ -21,6 +21,7 @@ type AccountHandler struct {
 }
 
 //初始化
+//initialization
 func NewAccountHandler(db localdb.Database, handler *EthHandler, poolSize int, path string) *AccountHandler {
 	return &AccountHandler{db: db, ethHandler: handler, accountPoolSize: poolSize, nonceFilePath: path, quitChannel: make(chan int, 1)}
 }
@@ -45,6 +46,7 @@ func (a *AccountHandler) use(address common.Address) {
 }
 
 //生成合约账户
+//Create account
 func (a *AccountHandler) generateAccount() (addr common.Address, err error) {
 	log.Debug("generateAccount.......")
 
@@ -66,6 +68,7 @@ func (a *AccountHandler) generateAccount() (addr common.Address, err error) {
 }
 
 //生成指定数量的account
+//Generate specified amount of accounts
 func (a *AccountHandler) generateAccounts(count int) (addrs []common.Address, err error) {
 	var i int
 	for i = 0; i < count; i++ {
@@ -80,6 +83,7 @@ func (a *AccountHandler) generateAccounts(count int) (addrs []common.Address, er
 }
 
 //启动 读取目前池中多少可用账户 生成指定数量账户
+//Startup Load current number of available accounts, generate specified number of accounts
 func (a *AccountHandler) Start() {
 	log.Debug("AccountHandler start.......")
 
@@ -128,6 +132,7 @@ func (a *AccountHandler) Start() {
 }
 
 //启动 读取目前池中多少可用账户 生成指定数量账户
+//Startup Load current number of available accounts, generate specified number of accounts
 func (a *AccountHandler) Stop() {
 	a.quitChannel <- 0
 }

@@ -38,6 +38,7 @@ contract Wallet {
 
     function transferERC20(ERC20 token, address _to, uint _amount) {
         // 只有收款账号才能操作转账
+        // Only wallet owner can transfer
         require(msg.sender == owner);
         if (!token.transfer(_to, _amount)) {
             revert();

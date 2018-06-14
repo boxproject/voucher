@@ -3,9 +3,9 @@ pragma solidity ^0.4.10;
 import "./erc20.sol";
 
 contract Bank {
-    // Deposit eth充值事件
-    // account 充值的人
-    // amount 充值数量
+    // Deposit eth充值事件; eth transfer event
+    // account 充值的人; account transfer from
+    // amount 充值数量; amount to transfer
     event Deposit(address account, uint256 amount);
     event Withdraw(address to, uint256 amount);
     event AllowFlow(bytes32 hash);
@@ -25,12 +25,13 @@ contract Bank {
     }
 
     function Bank() public {
-        // 该帐号拥有超级超级权限
+        // 该帐号拥有超级超级权限; people who created the contract own it.
         operator = msg.sender;
     }
 
     // 任何人都可以向这个合约充值
     // 记录日志 谁充值的，充到哪个钱包，充了多少钱
+    // Anyone can transfer fund to bank
     function() payable public {
         if (msg.value > 0) {
             Deposit(msg.sender, msg.value);
@@ -38,6 +39,7 @@ contract Bank {
     }
 
     // eth提现
+    // eth withdrawl, only owner with valid signature can withdraw
     function withdraw(address to, uint amount, bytes32 sf) public onlyOperator onlySignflow(sf) {
         require(to != 0 && amount > 0 && this.balance >= amount);
         to.transfer(amount);

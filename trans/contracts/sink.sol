@@ -29,6 +29,18 @@ import "./oracle.sol";
 //  1. 调用 disable 方法。
 // 提现申请需要传入本次提现的交易哈希和交易数额。由于需要经过2/3个系统签发者的确认，故需要每次都确认数字要对得上。
 // 如果遇到其中一个有对不上的情况，则本次交易失败。
+// This contract will save signature hash of approval flow and confirm withdrawal request
+// A normal flow looks like:
+//  1. Invoke addHash method to upload hash value of approval flow to private chain;
+//  2. Manager App confirm the hash by invoking 'enable' method
+//  3. Submit withdraw request by invoking 'approve' method
+// Every invoktion has to be confirmed by at least 2/3 signers, and then we can confirm correctness of submission
+// Withdrawl cannot be performed until approval flow has been uploaded to private chain and confirmed by manager APP
+// If there is anything happen on any of node which result in signature failure, we can disable current flow using manager APP, and start a new flow.
+// Disable flow works like as follows:
+//  1. Invoke disable method
+//  We have to send hash and amount as input parameters. Request has to be confirmed by at least 2/3 of signers, so the parameters have to be matched every time.
+//  request will fail if any of these above doesn't match
 contract Sink {
 
     Oracle oracle;
@@ -40,6 +52,12 @@ contract Sink {
     // APPLY   申请提现
     // {-- 审批流哈希上链 --- 授权者确认上链的审批流哈希 --- 申请提现 --}
     // 申请提现必须是审批流哈希确认之后，未确认的审批流是不能通过申请提现的。
+    // Status of approval flow
+    // ADD      upload request to private chain
+    // ENABLE   confirm request
+    // DISABLE  disable request
+    // APPLY    withdraw request
+    // Withdraw request will not be accepted until approval flow on private chain has been confirmed
     enum Stage { ADD, ENABLE, DISABLE, APPLY }
 
     struct Counter {
@@ -65,6 +83,7 @@ contract Sink {
         // Stage => Counter
         mapping (uint8 => Counter) stages;
         // 申请过的相同交易不能再次重复申请,必须确保每次的体现申请交易号必须不一样
+        // cannot have duplicated transactions, make sure transaction id is unique
         mapping (bytes32 => bool) trans;
     }
 
@@ -87,6 +106,7 @@ contract Sink {
     }
 
     // 本合约只能是n个节点中任意一个系统签名帐号来创建
+    // Contract has to be created by any signature account in node
     function Sink(Oracle ref) public {
         oracle = ref;
         stageVerify(Stage.ADD, 0, 0, 0, 0, 0, 0);
@@ -107,11 +127,14 @@ contract Sink {
 
     // txHash 用于确定某一次的交易
     // category 转账的类别
+    // txHash, used for confirm one transaction
+    // category, transaction category
     function approve(bytes32 txHash, uint amount, uint fee, address recipient, bytes32 hash, uint category) public onlySigner returns(bool) {
         return stageVerify(Stage.APPLY, hash, txHash, amount, fee, recipient, category);
     }
 
     // 校验审批流程哈希是否有效,只记录已经上链的审批流程哈希，不确定未经过2/3系统签发者
+    // Verify hash of approval flow is valid or not, only record those are on the private chain
     function available(bytes32 hash) constant public returns(bytes32, bool) {
         uint id = ids[hash];
         if (id == 0) {
@@ -122,6 +145,7 @@ contract Sink {
     }
 
     // 只记录交易成功的交易哈希
+    // Only record successful transaction hash
     function txExists(bytes32 hash, bytes32 txHash) constant public returns(bool) {
         uint id = ids[hash];
         if (id == 0) {
@@ -134,6 +158,8 @@ contract Sink {
 
     // 只有原始oracle中的boss才能更改oracle自身
     // 同时，新的oracle必须也要是boss才能生成
+    // Only boss in original oracle can update itself
+    // Only boss can create new oracle
     function changeOracle(address newOracle) public {
         require(oracle.boss() == msg.sender);
         oracle = Oracle(newOracle);
@@ -279,9 +305,11 @@ contract Sink {
     }
 
     // 服务的确认边界
+    // Confirm border of services
     function marginOfVotes() constant internal returns(uint data) {
         uint totalNodes = oracle.totalEnabledNodes();
         // 只有一个节点或两个节点时
+        // Only one or two nodes
         if (totalNodes == 1 || totalNodes == 2) {
             return totalNodes;
         }
@@ -289,6 +317,7 @@ contract Sink {
         uint mod = totalNodes % 2;
         if (mod != 0) {
             // 奇数时，满足 2n + 1
+            // Odd, satisfy 2n+1
             data = totalNodes/2 + mod;
         } else {
             data = totalNodes/2 + 1;

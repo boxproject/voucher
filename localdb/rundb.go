@@ -41,6 +41,7 @@ func RunDatabase(cfg *config.Config) (Database, error) {
 
 func prepare(db Database, cfg *config.Config) (err error) {
 	// 如果没有初始化过，则需要产生证书
+	// Create certificate if no initialization yet
 	if err = common.GenCert(cfg, config.SVRCERTSCRIPT); err != nil {
 		errors.GenServerCertErr.Err = err
 		return errors.GenServerCertErr
@@ -57,12 +58,14 @@ func prepare(db Database, cfg *config.Config) (err error) {
 	)
 
 	// 产生服务器端密钥
+	// Generate server side private key
 	if secret, err = common.GenSecret(cfg.Secret.SecretLength); err != nil {
 		errors.GenServerSecretErr.Err = err
 		return errors.GenServerSecretErr.Err
 	}
 
 	// 产生随机密钥
+	// Generate random private key
 	if pass, err = common.GenSecret(cfg.Secret.PassLength); err != nil {
 		errors.GenRandomPassErr.Err = err
 		return errors.GenRandomPassErr
