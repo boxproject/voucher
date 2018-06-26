@@ -1,3 +1,5 @@
+![architecture](https://github.com/boxproject/voucher/blob/master/banner.png)
+
 # BRIEF MARKET INTRODUCTION
 
 Banking and financial organizations are paying more attention to cryptocurrency, in particular hedge funds. The financing scale of VC investing in digital assets has shoot up from USD 2 million in 2012 to USD 3.4 billion, representing an increase by 1672.5 times in 6 years. The accumulative financing scale of VC digital assets investment climbed from 3 in 2012 to 182 in 2018. Institutional investors and businesses are now entering a crypto market becoming mature because their interest in funds dealing with blockchain technology and cryptocurrencies has grown steadily in recent months.
@@ -25,9 +27,9 @@ Under the circumstances that institutions usually hold different cryptocurrencie
 
 BOX provide an enterprise-grade security solution for digital assets custody, using cryptographically secure offline network including flow of approvals, private blockchain technology and communication security. BOX achieve integration of technologies and fundamentally solve the industry security issues such as the theft of private keys and the falsification of directives.
 
-![architecture](https://s3-ap-southeast-1.amazonaws.com/s3.box.images01/QQ20180518-141013%402x.png)
+![architecture](https://github.com/boxproject/voucher/blob/master/architecture.png)
 
-![example](https://s3-ap-southeast-1.amazonaws.com/s3.box.images01/QQ20180518-140745%402x.png)
+![example](https://github.com/boxproject/voucher/blob/master/process.png)
 
 **Owning the private key of an account gives full access to the fund.** The dynamic password provides shared authority, a one-click activation and ensures the security of private keys. The BOX system uses a single private key to manage all cryptocurrencies. Theoretically, all public chains that support the ECDSA elliptic curve algorithm can be controlled with the private key. At this point, the BOX system is more convenient than multi-signature. Meanwhile, BOX uses a multi-person multi-password method to automatically generate a private key by using an algorithm in a signature machine, and then generate a public key from the private key. The partners who have the highest authority only have a part of the dynamic password which provides him with a shared governance on the private key.
 
