@@ -9,7 +9,7 @@
         <tag>file</tag>
         <type>file</type>
         <level>INFO</level>
-        <property name="filename">/Users/wangzl/Work/src/github.com/boxproject/voucher/build/log/voucher.log</property>
+        <property name="filename">../log/voucher.log</property>
         <!--
            %T - Time (15:04:05 MST)
            %t - Time (15:04)
