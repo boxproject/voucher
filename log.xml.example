@@ -8,8 +8,8 @@
     <filter enabled="true">
         <tag>file</tag>
         <type>file</type>
-        <level>INFO</level>
-        <property name="filename">/Users/wangzl/Work/src/github.com/boxproject/voucher/build/log/voucher.log</property>
+        <property name="filename">/opt/box/voucher/log/voucher.log</property>
+        <level>DEBUG</level>
         <!--
            %T - Time (15:04:05 MST)
            %t - Time (15:04)
@@ -41,7 +41,7 @@
         <tag>donotopen</tag>
         <type>socket</type>
         <level>FINEST</level>
-        <property name="endpoint">192.168.1.255:12124</property> <!-- recommend UDP broadcast -->
+        <property name="endpoint">127.0.0.1:12124</property> <!-- recommend UDP broadcast -->
         <property name="protocol">udp</property> <!-- tcp or udp -->
     </filter>
 </logging>

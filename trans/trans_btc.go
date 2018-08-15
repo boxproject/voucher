@@ -25,9 +25,10 @@ import (
 
 //BTC db 前缀
 const (
-	BTC_TXID   = "BTC_TXID_"
-	BTC_TXID_0 = BTC_TXID + "0_"
-	BTC_TXID_1 = BTC_TXID + "1_"
+	BTC_LOG_LABLE = "[BTC]"
+	BTC_TXID      = "BTC_TXID_"
+	BTC_TXID_0    = BTC_TXID + "0_"
+	BTC_TXID_1    = BTC_TXID + "1_"
 )
 
 const (
@@ -49,11 +50,11 @@ type BTCTxidInfo struct {
 type BtcHandler struct {
 	db        localdb.Database
 	btcConf   *config.BitcoinConfig
-	quitCh    chan struct{}
 	clientCfg *rpcclient.ConnConfig
 	client    *rpcclient.Client
 	accHandle *AccountHandlerBtc
 	isStart   bool
+	isScaning bool
 	Net       *chaincfg.Params
 }
 
@@ -71,15 +72,23 @@ func NewBtcHandler(cfg *config.Config, db localdb.Database) (*BtcHandler, error)
 		db:        db,
 		btcConf:   btcConf,
 		clientCfg: clientDfg,
-		quitCh:    make(chan struct{}, 1),
 		isStart:   false}
 	btcHandler.accHandle = NewAccountHandlerBtc(db, btcHandler)
 
 	return btcHandler, nil
 }
 
+func (w *BtcHandler) Status() (isWork bool) {
+	if w.isStart && w.accHandle.isInited {
+		isWork = true
+	} else {
+		isWork = false
+	}
+	return isWork
+}
 func (w *BtcHandler) Start() (err error) {
 	if w.isStart {
+		log.Info("bitcoin started")
 		return nil
 	}
 	log.Info("bitcoin rpc connect...")
@@ -87,12 +96,27 @@ func (w *BtcHandler) Start() (err error) {
 		log.Error("bitcoin rpc new failed.")
 		return err
 	}
-	chainInfo, err := w.client.GetBlockChainInfo()
-	if err != nil {
-		log.Error("bitcoin rpc conect:", err)
+	//更新BTC网络类型
+	w.getBTCNetType()
+
+	log.Info("bitcoin rpc connect OK")
+
+	if err := w.accHandle.Init(); err != nil {
+		return err
 	}
+	go w.btcChainHandler() //bitcoin公链操作
+
+	return nil
+}
+//获取BTC网络类型：main,testnet,regtest
+func (w *BtcHandler) getBTCNetType(){
 
 	var netType string
+	//如果配置文件内有配置，则使用配置文件内参数，如果没有配置则使用
+	chainInfo, err := w.client.GetBlockChainInfo()
+	if err != nil {
+		log.Warn(BTC_LOG_LABLE+"GetBlockChainInfo error:"+err.Error())
+	}
 	if w.btcConf.Type != "" {
 		netType = w.btcConf.Type
 	} else if chainInfo != nil {
@@ -112,15 +136,8 @@ func (w *BtcHandler) Start() (err error) {
 		w.Net = &chaincfg.RegressionNetParams
 		break
 	}
-	log.Info("bitcoin rpc connect OK")
-
-	if err := w.accHandle.Init(); err != nil {
-		return err
-	}
-	go w.btcChainHandler() //bitcoin公链操作
-
-	return nil
 }
+
 //获取btc地址
 func (w *BtcHandler) GetAccount() string {
 	if w.accHandle.Account != nil {
@@ -145,79 +162,62 @@ func (w *BtcHandler) getTxidAddr(txid string, vout uint32) (addr string, err err
 	}
 }
 
-func (w *BtcHandler) btcDispoitScan(txid string) {
-	if sTxid, err := chainhash.NewHashFromStr(txid); err != nil {
-		log.Error("get txid hash failed:", err)
+func (w *BtcHandler) btcDispoitScan(txHash *chainhash.Hash)(err error) {
+	txid := txHash.String()
+	if raw, err := w.client.GetRawTransactionVerbose(txHash); err != nil {
+		log.Error(BTC_LOG_LABLE+"GetRawTransactionVerbose error:",err)
+		return err
 	} else {
-		var vinAddr = make(map[string]string)
-		var fromAddr string
-		tx, err := w.client.GetTransaction(sTxid)
-		if err != nil {
-			log.Error(err)
-			return
-		}
-		bytes, _ := hex.DecodeString(tx.Hex)
-		if raw, err := w.client.DecodeRawTransaction(bytes); err != nil {
-			log.Error(err)
-			return
-		} else {
-			//获取 from 地址
-			fromAddr = ""
-			for _, VinValue := range raw.Vin {
-				addr, _ := w.getTxidAddr(VinValue.Txid, VinValue.Vout)
-				if _, ok := vinAddr[addr]; ok == false {
-					vinAddr[addr] = addr
-					if fromAddr == "" {
-						fromAddr = addr
-					} else {
-						fromAddr = fromAddr + "," + addr
+		for _, value := range raw.Vout {
+			if len(value.ScriptPubKey.Addresses) <= 0 {
+				continue
+			}
+			//判断记录内是否有系统内的账户
+			if w.accHandle.Account.EncodeAddress() == value.ScriptPubKey.Addresses[0] {
+				//检测是否为转账交易
+				isInFromAddr := false
+				for _,addr := range raw.Vin {
+					if fromAddr ,err := w.getTxidAddr(addr.Txid, addr.Vout);err != nil{
+						log.Error(BTC_LOG_LABLE+"getTxidAddr error:%v",err.Error())
+						continue
+					}else if w.accHandle.Account.EncodeAddress() == fromAddr{
+						isInFromAddr = true
+						continue
 					}
 				}
-			}
-			for _, value := range raw.Vout {
-				if len(value.ScriptPubKey.Addresses) <= 0 {
+				if isInFromAddr {
+					log.Info(BTC_LOG_LABLE+"checkout withDraw Transaction:[txhash=%v]",txHash.String())
 					continue
 				}
-				//判断记录内是否有系统内的账户
-				if w.accHandle.Account.EncodeAddress() == value.ScriptPubKey.Addresses[0] {
-					address := value.ScriptPubKey.Addresses[0]
-					amount, _ := btcutil.NewAmount(value.Value)
-					var newAmount *big.Int
-					newAmount = big.NewInt(int64(amount.ToBTC() * 1e8))
 
-					w.accHandle.uncfmMu.Lock()
-					w.accHandle.UncfmTxidMap[txid] = &BTCTxidInfo{TXID: txid, Addr: address, Type: BTC_TXID_TYPE_DEP, Vout: value.N, Amount: newAmount} //Vout暂时设置为0
-					w.accHandle.uncfmMu.Unlock()
+				address := value.ScriptPubKey.Addresses[0]
+				amount, _ := btcutil.NewAmount(value.Value)
+				var newAmount *big.Int
+				newAmount = big.NewInt(int64(amount.ToBTC() * 1e8))
 
-					if bytes, err := json.Marshal(w.accHandle.UncfmTxidMap[txid]); err != nil {
-						log.Error("db unmarshal err: %v", err)
-					} else {
-						log.Debug("[发现充值txid]:", w.accHandle.UncfmTxidMap[txid])
-						//添加记录到数据文件
-						if err := w.db.Put([]byte(BTC_TXID_0+txid), bytes); err != nil {
-							log.Error("write btc txid txid db failed....")
-						}
+				w.accHandle.uncfmMu.Lock()
+				w.accHandle.UncfmTxidMap[txid] = &BTCTxidInfo{TXID: txid, Addr: address, Type: BTC_TXID_TYPE_DEP, Vout: value.N, Amount: newAmount} //Vout暂时设置为0
+				w.accHandle.uncfmMu.Unlock()
+
+				if bytes, err := json.Marshal(w.accHandle.UncfmTxidMap[txid]); err != nil {
+					log.Error("db unmarshal err: %v", err)
+				} else {
+					log.Debug("[发现充值txid]:", w.accHandle.UncfmTxidMap[txid])
+					//添加记录到数据文件
+					if err := w.db.Put([]byte(BTC_TXID_0+txid), bytes); err != nil {
+						log.Error("write btc txid txid db failed....")
 					}
 				}
 			}
 		}
 	}
+	return nil
 }
 
 func (w *BtcHandler) btcGetFromAddr(txid *chainhash.Hash) string {
 	//获取from地址
 	var fromAddr string = ""
-	tx, err := w.client.GetTransaction(txid)
-	if err != nil {
-		log.Error(err)
-		return fromAddr
-	}
-	bytes, err := hex.DecodeString(tx.Hex)
-	if err != nil {
-		log.Error(err)
-		return fromAddr
-	}
-	raw, err := w.client.DecodeRawTransaction(bytes)
+	raw, err := w.client.GetRawTransactionVerbose(txid)
 	if err != nil {
 		log.Error(err)
 		return fromAddr
@@ -248,26 +248,27 @@ func (w *BtcHandler) btcChainHandler() {
 			2，监控bitcoin节点交易【提币】情况
 	*/
 	timerListenBtc := time.NewTicker(time.Second * 5)
-	isScaning := false
+	w.isScaning = false
 
 	w.isStart = true
 	for w.isStart {
 		select {
-		case _, ok := <-w.quitCh:
-			if ok {
-				log.Info("PriEthHandler::SendMessage thread exitCh!")
-			} else {
-				log.Info("quit chan closed...")
-			}
-			w.isStart = false
 		case data, ok := <-config.BtcRecordChan: //提币交易
 			if ok {
 				log.Debug("BtcRecordChannel :%s", data)
 				switch data.Type {
 				case config.BTC_TYPE_APPROVE:
 					if err := w.btcTransferHandler(data); err != nil {
+						rep := &config.GrpcStream{
+							Type: config.GRPC_WITHDRAW_TX_WEB,
+							To: data.To,
+							WdHash: data.WdHash,
+							TxHash: "",
+							Category: big.NewInt(config.CATEGORY_BTC)}
+						config.ReportedChan <- rep
+						log.Info(BTC_LOG_LABLE+"[转账交易失败上报]", rep)
 						//如果构造交易失败，返回为空的txid
-						config.ReportedChan <- &config.GrpcStream{Type: config.GRPC_WITHDRAW_TX_WEB, To: data.To, WdHash: data.WdHash, TxHash: "", Category: big.NewInt(config.CATEGORY_BTC)}
+
 					}
 				default:
 					log.Info("unknow req:%v", data)
@@ -276,112 +277,135 @@ func (w *BtcHandler) btcChainHandler() {
 				log.Error("read from channel failed")
 			}
 		case <-timerListenBtc.C: //BTC公链区块扫描
-			if isScaning == true || w.accHandle.isInited == false {
-				continue
-			}
-			isScaning = true
-			blockCount, err := w.client.GetBlockCount()
-			if err != nil {
-				log.Error(err)
-				isScaning = false
-				continue
-			}
-			var blockCorsor int64 = 0
-			ret, err := util.ReadNumberFromFile(w.btcConf.BlockNoFilePath)
-			if err != nil {
-				log.Error("get btc block height num failed,", err)
-				util.WriteNumberToFile(w.btcConf.BlockNoFilePath, big.NewInt(blockCount))
-				blockCorsor = blockCount
-			} else {
-				blockCorsor = ret.Int64()
-			}
-
-			if blockCorsor > blockCount {
-				//如果当前的区块高度小于区块的检索高度，设置区块检索高度为当前的区块高度
-				util.WriteNumberToFile(w.btcConf.BlockNoFilePath, big.NewInt(blockCount))
-				blockCorsor = blockCount
-			}
-
-			//如果最新区块高度大于已经扫描了的区块高度
-			for blockCount > blockCorsor {
-				log.Info("BTC block scanning, height----->", blockCorsor+1)
-				if chanHash, err := w.client.GetBlockHash(blockCorsor + 1); err != nil {
-					log.Error("getblockhash err:", err)
-				} else {
-					if msgBlock, err := w.client.GetBlock(chanHash); err != nil {
-						log.Error("getblock err:", err)
-					} else {
-						//检测充值交易
-						for _, txid := range msgBlock.Transactions {
-							//判断是否为发起的提现交易
-							if _, isHaveTxid := w.accHandle.UncfmTxidMap[txid.TxHash().String()]; isHaveTxid == false {
-								//检索，查找充值
-								w.btcDispoitScan(txid.TxHash().String())
-							}
-						}
-						//检测记录的交易是否已经生效【暂定6次确定】
-						w.accHandle.uncfmMu.Lock()
-						for txid, txidInfo := range w.accHandle.UncfmTxidMap {
-							if sTxid, err := chainhash.NewHashFromStr(txid); err != nil {
-								log.Error("get txid hash failed:", err)
-							} else {
-								if tranResult, err := w.client.GetTransaction(sTxid); err != nil {
-									log.Error("get Transaction failed:", err)
-								} else {
-									//确认区块儿超过6个
-									if tranResult.Confirmations >= w.btcConf.Confirmations {
-										switch txidInfo.Type {
-										case BTC_TXID_TYPE_WD:
-											grpcSend := &config.GrpcStream{Type: config.GRPC_WITHDRAW_WEB, To: txidInfo.Addr, Amount: txidInfo.Amount, TxHash: txid, WdHash: txidInfo.WDhash, Category: big.NewInt(config.CATEGORY_BTC)}
-											config.ReportedChan <- grpcSend
-											//上报提现状态
-											log.Info("[WITHDRAW REPORT]:提现上报")
-											log.Debug(grpcSend)
-											break
-										case BTC_TXID_TYPE_DEP:
-											//获取from地址
-											fromAddr := w.btcGetFromAddr(sTxid)
-											grpcSend := &config.GrpcStream{Type: config.GRPC_DEPOSIT_WEB, From: fromAddr, To: txidInfo.Addr, Amount: txidInfo.Amount, TxHash: txid, Category: big.NewInt(config.CATEGORY_BTC)}
-											config.ReportedChan <- grpcSend
-											//充值确认
-											log.Info("[DEPOSIT REPORT]:充值上报", grpcSend)
-											log.Debug(grpcSend)
-											break
-										default:
-											log.Info("no this type:", txidInfo.Type)
-
-										}
-
-										if bytes, err := json.Marshal(w.accHandle.UncfmTxidMap[txid]); err != nil {
-											log.Error("db unmarshal err: %v", err)
-										} else {
-											delete(w.accHandle.UncfmTxidMap, txid)
-											//跟新数据库
-											w.db.Delete([]byte(BTC_TXID_0 + txid))
-											if err := w.db.Put([]byte(BTC_TXID_1+txid), bytes); err != nil {
-												log.Error("CheckPrivateKey err: %s", err)
-											}
-										}
-									}
-								}
-							}
-						}
-						w.accHandle.uncfmMu.Unlock()
-
-						//扫描完毕，更新数据
-						util.WriteNumberToFile(w.btcConf.BlockNoFilePath, big.NewInt(blockCorsor+1))
-						blockCorsor++
-						log.Debug("blockCorsor wirte:", blockCorsor)
-					}
-				}
-			}
-			isScaning = false
+			go w.btcChainScan()
 		}
 	}
 
 	log.Debug("end of btcChainHandler...")
 }
 
+func (w *BtcHandler) btcChainScan() {
+	if w.isScaning == true || w.accHandle.isInited == false {
+		return
+	}
+	w.isScaning = true
+	blockCount, err := w.client.GetBlockCount()
+	if err != nil {
+		log.Error(err)
+		w.isScaning = false
+		return
+	}
+	var blockCorsor int64 = 0
+	ret, err := util.ReadNumberFromFile(w.btcConf.BlockNoFilePath)
+	if err != nil {
+		log.Warn("get btc block height num failed,", err)
+		util.WriteNumberToFile(w.btcConf.BlockNoFilePath, big.NewInt(blockCount))
+		blockCorsor = blockCount
+	} else {
+		blockCorsor = ret.Int64()
+	}
+	//如果最新区块高度大于已经扫描了的区块高度
+	for blockCount > blockCorsor {
+		log.Info(BTC_LOG_LABLE+"BTC block scanning, height----->", blockCorsor+1)
+		var chanHash *chainhash.Hash
+		if chanHash, err = w.client.GetBlockHash(blockCorsor + 1); err != nil {
+			log.Error(BTC_LOG_LABLE+"getblockhash err:", err)
+			if _,err :=w.client.GetBlockCount(); err != nil {
+				w.isScaning = false
+				return
+			}
+			continue
+		}
+
+		var msgBlock *wire.MsgBlock
+		if msgBlock, err = w.client.GetBlock(chanHash); err != nil {
+			log.Error(BTC_LOG_LABLE+"getblock err:", err)
+			if _,err :=w.client.GetBlockCount(); err != nil {
+				w.isScaning = false
+				return
+			}
+			continue
+		}
+
+		log.Debug(BTC_LOG_LABLE+"TXID COUNT:",len(msgBlock.Transactions))
+		for _, txid := range msgBlock.Transactions {
+			txHash := txid.TxHash()
+			txHashStr := txid.TxHash().String()
+			//判断是否为发起的提现交易
+			if _, isHaveTxid := w.accHandle.UncfmTxidMap[txHashStr]; isHaveTxid == false {
+				//检索，查找充值
+				if w.btcDispoitScan(&txHash) != nil{
+					if _,err :=w.client.GetBlockCount(); err != nil {
+						w.isScaning = false
+						return
+					}
+				}
+			}
+		}
+		//更新未成交交易状态
+		w.btcUpdateUncfmTxid()
+
+		//扫描完毕，更新数据
+		util.WriteNumberToFile(w.btcConf.BlockNoFilePath, big.NewInt(blockCorsor+1))
+		blockCorsor++
+	}
+	w.isScaning = false
+}
+
+//更新未成交交易状态
+func (w *BtcHandler) btcUpdateUncfmTxid(){
+
+	//检测记录的交易是否已经生效【暂定6次确定】
+	w.accHandle.uncfmMu.Lock()
+	for txid, txidInfo := range w.accHandle.UncfmTxidMap {
+		txHash, err := chainhash.NewHashFromStr(txid)
+		if err != nil {
+			log.Error("get txid hash failed:", err)
+			continue
+		}
+
+		tranResult, err := w.client.GetRawTransactionVerbose(txHash)
+		if  err != nil {
+			log.Error("get Transaction failed:", err)
+			continue
+		}
+		//确认区块儿超过6个
+		if tranResult.Confirmations >= uint64(w.btcConf.Confirmations) {
+			switch txidInfo.Type {
+			case BTC_TXID_TYPE_WD:
+				grpcSend := &config.GrpcStream{Type: config.GRPC_WITHDRAW_WEB, To: txidInfo.Addr, Amount: txidInfo.Amount, TxHash: txidInfo.TXID, WdHash: txidInfo.WDhash, Category: big.NewInt(config.CATEGORY_BTC)}
+				config.ReportedChan <- grpcSend
+				//上报提现状态
+				log.Info("[WITHDRAW REPORT]:提现上报")
+				log.Debug(grpcSend)
+				break
+			case BTC_TXID_TYPE_DEP:
+				//获取from地址
+				fromAddr := w.btcGetFromAddr(txHash)
+				grpcSend := &config.GrpcStream{Type: config.GRPC_DEPOSIT_WEB, From: fromAddr, To: txidInfo.Addr, Amount: txidInfo.Amount, TxHash: txidInfo.TXID, Category: big.NewInt(config.CATEGORY_BTC)}
+				config.ReportedChan <- grpcSend
+				//充值确认
+				log.Info("[DEPOSIT REPORT]:充值上报")
+				log.Debug(grpcSend)
+				break
+			default:
+				log.Info("NO THIS TYPE:", txidInfo.Type)
+			}
+
+			if bytes, err := json.Marshal(txidInfo); err != nil {
+				log.Error("db unmarshal err: %v", err)
+			} else {
+				delete(w.accHandle.UncfmTxidMap, txidInfo.TXID)
+				//跟新数据库
+				w.db.Delete([]byte(BTC_TXID_0 + txidInfo.TXID))
+				if err := w.db.Put([]byte(BTC_TXID_1+txidInfo.TXID), bytes); err != nil {
+					log.Error("CheckPrivateKey err: %s", err)
+				}
+			}
+		}
+	}
+	w.accHandle.uncfmMu.Unlock()
+}
 // 提款交易
 func (w *BtcHandler) btcTransferHandler(record *config.BtcRecord) error {
 	//更换地址格式
@@ -417,7 +441,7 @@ func (w *BtcHandler) btcTransferHandler(record *config.BtcRecord) error {
 	rawtx.AddTxOut(txOut)
 
 	//地址格式转化
-	listUspent, err := w.client.ListUnspentMinMaxAddresses(0, 99999999, []btcutil.Address{w.accHandle.Account})
+	listUspent, err := w.client.ListUnspentMinMaxAddresses(int(w.btcConf.Confirmations), 99999999, []btcutil.Address{w.accHandle.Account})
 	if err != nil {
 		log.Error("get listuspent err:", err)
 	}
@@ -459,7 +483,8 @@ func (w *BtcHandler) btcTransferHandler(record *config.BtcRecord) error {
 	}
 
 	if leftAmount < 0 {
-		log.Error("utxo not enough...")
+		dispStr := "NEED BTC:" + allSpend.String() + "|GET BTC:" + getAmount.String()
+		log.Error(BTC_LOG_LABLE +"UTXO NOT ENOUGH:"+dispStr)
 		return err
 	}
 
@@ -511,9 +536,18 @@ func (w *BtcHandler) btcTransferHandler(record *config.BtcRecord) error {
 		}
 
 		//config.ReportedChan <- &config.RepM{RepType: config.REP_WITHDRAW_TX, WdHash: record.WdHash.Hex(), TxHash: txHash.String(), To: record.To}
-		config.ReportedChan <- &config.GrpcStream{Type: config.GRPC_WITHDRAW_TX_WEB, To: record.To, WdHash: record.WdHash, TxHash: txHash.String(), Category: big.NewInt(config.CATEGORY_BTC)}
-		log.Debug("record UncfmTxidMap [key]:", txHash.String())
-		log.Debug("record UncfmTxidMap [value]:", record.WdHash.String())
+		rep := &config.GrpcStream{
+			Type: config.GRPC_WITHDRAW_TX_WEB,
+			To: record.To,
+			WdHash: record.WdHash,
+			TxHash: txHash.String(),
+			Category: big.NewInt(config.CATEGORY_BTC)}
+
+		config.ReportedChan <- rep
+		log.Info(BTC_LOG_LABLE+"[转出成功TXID上报]", rep)
+
+		//log.Debug("record UncfmTxidMap [key]:", txHash.String())
+		//log.Debug("record UncfmTxidMap [value]:", record.WdHash.String())
 	}
 
 	return nil
@@ -544,16 +578,15 @@ func (w *BtcHandler) btcAddressImport(address btcutil.Address) bool {
 }
 
 func (w *BtcHandler) Stop() {
+	//log.Info("stop bitcoin server")
+	//stop account
 	w.accHandle.Stop()
 
-	if w.quitCh != nil {
-		w.quitCh <- struct{}{}
-	}
+	w.isStart = false
 	if w.client != nil {
-		log.Info("close bitcoin rpc client...")
 		w.client.Shutdown()
-		log.Info("close bitcoin rpc client OK")
 	}
+	log.Info("bitcoin server Stopped")
 }
 
 /*
@@ -561,7 +594,7 @@ func (w *BtcHandler) Stop() {
 */
 type AccountHandlerBtc struct {
 	db          localdb.Database
-	quitChannel chan int
+	//quitChannel chan int
 	isInited    bool
 
 	handler      *BtcHandler
@@ -577,19 +610,18 @@ func NewAccountHandlerBtc(db localdb.Database, handler *BtcHandler) *AccountHand
 		isInited:     false,
 		db:           db,
 		handler:      handler,
-		quitChannel:  make(chan int, 1),
+		//quitChannel:  make(chan int, 1),
 		UncfmTxidMap: make(map[string]*BTCTxidInfo),
 	}
 }
 
 func (a *AccountHandlerBtc) Init() error {
 	log.Debug("AccountHandlerBtc init.......")
-
 	if accStr, err := GetBtcPubKey(a.db); err != nil {
 		log.Error(err)
 		return err
 	} else {
-		log.Debug("btc db address:", accStr)
+		log.Debug(BTC_LOG_LABLE+"BTC ADDRESS:", accStr)
 		//转化地址格式
 		if addr, err := btcutil.DecodeAddress(accStr, &chaincfg.Params{}); err != nil {
 			log.Error(err)
@@ -603,7 +635,7 @@ func (a *AccountHandlerBtc) Init() error {
 		}
 	}
 
-	log.Info("account:\n", a.Account)
+	log.Info(BTC_LOG_LABLE+"ACCOUNT:", a.Account)
 	//获取btc未被确认的txid列表
 	if nconfirmedTxidList, err := a.db.GetPrifix([]byte(BTC_TXID_0)); err != nil {
 		log.Error("db error:", err)
@@ -620,33 +652,24 @@ func (a *AccountHandlerBtc) Init() error {
 		}
 		a.uncfmMu.Unlock()
 	}
-
-	timerScanAddImp := time.NewTicker(time.Second * 5)
-	isScaning := false
 	go func() {
+		timerScanAddImp := time.NewTicker(time.Second * 5)
+		isScaning := false
 		for a.isInited == false {
 			select {
-			case _, ok := <-a.quitChannel:
-				if ok {
-					log.Info("AccountHandlerBtc::SendMessage thread exitCh!")
-				} else {
-					log.Info("quitChannel closed...")
-				}
-				a.isInited = true
-			case <-timerScanAddImp.C:
-				if isScaning == true {
-					continue
-				}
-				isScaning = true
-				//地址导入
-				if a.handler.btcAddressImport(a.Account) {
-					a.isInited = true
-				}
-				isScaning = false
+				case <-timerScanAddImp.C:
+					if isScaning == true {
+						continue
+					}
+					isScaning = true
+					//地址导入
+					if a.handler.btcAddressImport(a.Account) {
+						a.isInited = true
+						log.Info("[BTC]ALL ACCOUNT IS IMPORTED")
+					}
+					isScaning = false
 			}
 		}
-		//for test
-		//config.BtcRecordChan <- &config.BtcRecord{Type: config.BTC_TYPE_APPROVE, WdHash: common.BytesToHash([]byte(time.Now().String())), Handlefee: big.NewInt(1000), To: "mv7t326zN5K1oRWUV4HR1fLw1QpHVEZEN1", Amount: big.NewInt(100000)}
 	}()
 
 	log.Info("AccountHandlerBtc init finished")
@@ -654,22 +677,51 @@ func (a *AccountHandlerBtc) Init() error {
 }
 
 func (a *AccountHandlerBtc) Stop() {
-	if a.quitChannel != nil {
-		a.quitChannel <- 0
+	a.isInited = false
+}
+
+func (w *BtcHandler) test() {
+	testTicker := time.NewTicker(time.Second * 10)
+	for !w.isStart || !w.accHandle.isInited {
+		//等待初始化完成
+		time.Sleep(time.Second)
+	}
+	//设置chan
+	for w.isStart && w.accHandle.isInited {
+		select {
+		case <-testTicker.C:
+			acc := time.Now().String()
+			if btcAddr,err := w.client.GetNewAddress(acc);err == nil{
+				//fmt.Println("send trans....")
+				config.BtcRecordChan <- &config.BtcRecord{
+					Type:      config.BTC_TYPE_APPROVE,
+					WdHash:    common.BytesToHash([]byte(time.Now().String())),
+					Handlefee: big.NewInt((time.Now().UnixNano()%9 + 1) * 1000),
+					To:        btcAddr.String(),
+					Amount:    big.NewInt((time.Now().UnixNano()%1000 + 1) * 1e5)}
+			}else {
+				log.Error(BTC_LOG_LABLE+"GetAccountAddress error :",err)
+			}
+		}
 	}
 }
 
 func Btc_test(cfg *config.Config, db localdb.Database) (*BtcHandler, error) {
 	/*bitcoin test ----begin
-	btcHd,_ :=trans.Btc_test(cfg,db)
-	defer btcHd.Stop()
+	btc,err  := trans.Btc_test(cfg, db )
+	if err != nil {
+		logger.Error("run Btc_test failed. cause: %v", err)
+		return err
+	}
+	defer btc.Stop()
 	<-quitCh
-	return nil
+	return err
 	bitcoin test ----end*/
 
 	RecoverPrivateKey(db, []byte("dhjflaksjhdfkasdfkahskd"))
 	btcHandler, _ := NewBtcHandler(cfg, db)
 	btcHandler.Start()
+	//go btcHandler.test()
 
 	return btcHandler, nil
 }

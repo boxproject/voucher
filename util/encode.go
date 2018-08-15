@@ -128,7 +128,7 @@ func RsaSignVerWithKey(data []byte, signature []byte, publicKey []byte) error {
 	if err != nil {
 		log.Error("base64 Decode error:", err)
 	}
-	log.Debug("base64 key...", string(bKey))
+	//log.Debug("base64 key...", string(bKey))
 	pub, err := x509.ParsePKCS1PublicKey(bKey)
 	if err != nil {
 		log.Error("ParsePKCS1PublicKey err: %s", err)

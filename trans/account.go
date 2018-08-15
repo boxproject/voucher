@@ -131,6 +131,45 @@ func CheckPrivateKey(db localdb.Database, args ...[]byte) bool {
 	return false
 }
 
+//验证密码
+func RecordPasswordHash(db localdb.Database, id ,pass string)(bool){
+	if pvhash, err := db.Get([]byte(id)); err != nil {
+		log.Error("CheckPrivateKey err: %s", err)
+		d := sha3.NewKeccak512()
+		d.Write([]byte(pass))
+		pv := d.Sum(nil)
+		hashBytes := md5.Sum(pv)
+		if err := db.Put([]byte(id), hashBytes[:]); err != nil {
+			log.Error("put hash db error:",err)
+			return false
+		}
+	}else {
+		//数据不为空则退出
+		if len(pvhash) != 0 {
+			return false
+		}
+	}
+	return true
+}
+//验证密码
+func CheckPasswordHash(db localdb.Database, id ,pass string)(bool){
+	if pvhash, err := db.Get([]byte(id)); err != nil {
+		log.Error("CheckPrivateKey err: %s", err)
+		return false
+	}else {
+		d := sha3.NewKeccak512()
+		d.Write([]byte(pass))
+		pv := d.Sum(nil)
+		hashBytes := md5.Sum(pv)
+		if bytes.Equal(pvhash, hashBytes[:]) {
+			return true
+		}else {
+			return false
+		}
+	}
+	return false
+}
+
 func setPubKeytoDB(db localdb.Database) error {
 	if pk == nil {
 		return errors.New("get eth privkey error, data is nil")

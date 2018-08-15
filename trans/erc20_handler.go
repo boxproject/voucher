@@ -21,6 +21,7 @@ import (
 	"github.com/boxproject/voucher/token"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"math/big"
+	"strings"
 )
 
 func newERC20Handler(cfg *HandlerContext, cli *ethclient.Client) EventHandler {
@@ -38,7 +39,7 @@ func (e *erc20Handler) Name() common.Hash {
 
 func (e *erc20Handler) Scan(eLog *common.EtherLog) error {
 	length := len(eLog.Topics)
-	log.Debug("~~~~~ ERC20 event ~~~~~ topic length: %d", length)
+	//log.Debug("~~~~~ ERC20 event ~~~~~ topic length: %d", length)
 	if length == 3 {
 
 		// May be ERC20
@@ -85,7 +86,7 @@ func (e *erc20Handler) Scan(eLog *common.EtherLog) error {
 }
 
 func scanAddress(addr string) (bool, int64) {
-	if ethToken := token.GetTokenByAddr(addr); ethToken != nil {
+	if ethToken := token.GetTokenByAddr(strings.ToLower(addr)); ethToken != nil {
 		return true, ethToken.Category
 	}
 	return false, 0

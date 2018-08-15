@@ -85,9 +85,29 @@ func (n *NodeApi) CloseConn() error {
 	return nil
 }
 
+//grpc失败重发
+func (n *NodeApi) RepReSend() {
+	//get db
+	if grpcReSendMap, err := n.db.GetPrifix([]byte(config.PUB_DB_BAK_PRIFIX)); err != nil {
+		log.Error("db error:", err)
+	} else {
+		for _, value := range grpcReSendMap {
+			grpcMsg := &config.GrpcStream{}
+			if err := json.Unmarshal([]byte(value), grpcMsg); err != nil {
+				log.Error("db unmarshal err: %v", err)
+			} else {
+				//resend grpc
+				config.ReportedChan <- grpcMsg
+				log.Debug("[GRPC RESEND][TYPE=%v]", grpcMsg.Type)
+			}
+		}
+	}
+}
+
 //report
 func (n *NodeApi) RepStart() {
 	log.Info("node rep started!")
+	reSendTick := time.NewTicker(time.Second * 5)
 	for true {
 		select {
 		case data, ok := <-config.ReportedChan:
@@ -115,12 +135,17 @@ func (n *NodeApi) RepStart() {
 				case config.GRPC_HASH_ENABLE_WEB:
 					n.HashEnableRequest(data)
 					break
+				case config.GRPC_CHECK_KEY_WEB:
+					n.CheckKeyRequest(data)
+					break
 				default:
 					log.Info("unknown node req type:%v", data.Type)
 				}
 			} else {
 				log.Error("read node from channel failed")
 			}
+		case <-reSendTick.C:
+			n.RepReSend()
 		}
 	}
 }
@@ -167,43 +192,111 @@ LOOP:
 
 //充值上报
 func (n *NodeApi) DepositRequest(grpcStream *config.GrpcStream) bool {
-	if msg, err := json.Marshal(grpcStream); err != nil {
+	log.Debug("DepositRequest:%v", grpcStream)
+	msg, err := json.Marshal(grpcStream)
+	if err != nil {
 		log.Error("DepositRequest marshal err: %s", err)
-		//TODO
-	} else {
-		n.router(config.ROUTER_TYPE_WEB, "", msg)
+		return false
 	}
+
+	dbLabel := config.ROUTER_PRIDFIX + config.DEPOSIT_PRIFIX + grpcStream.WdHash.Hex() + grpcStream.TxHash
+	dbLabelBak := config.PUB_DB_BAK_PRIFIX + dbLabel
+	dbData, _ := n.db.Get([]byte(dbLabel))
+	if len(dbData) > 0 {
+		log.Debug("[ROUTER]:already have:%v", dbLabel)
+		//重复上报限时，需要时放开下行return 代码
+		//return false
+	} else {
+		//backup data
+		n.db.Put([]byte(dbLabelBak), msg)
+	}
+
+	if _, err = n.router(config.ROUTER_TYPE_WEB, "", msg); err != nil {
+		return false
+	} else {
+		//update db
+		n.db.Put([]byte(dbLabel), msg)
+		//delete db backup
+		n.db.Delete([]byte(dbLabelBak))
+	}
+
 	return true
 }
 
 //提现tx上报
 func (n *NodeApi) WithDrewTxRequest(grpcStream *config.GrpcStream) bool {
-	if msg, err := json.Marshal(grpcStream); err != nil {
+	log.Debug("WithDrewTxRequest:%v", grpcStream)
+	msg, err := json.Marshal(grpcStream)
+	if err != nil {
 		log.Error("WithDrewTxRequest marshal err: %s", err)
-		//TODO
-	} else {
-		n.router(config.ROUTER_TYPE_WEB, "", msg)
+		return false
 	}
+	dbLabel := config.ROUTER_PRIDFIX + config.WITHDRAW_TX_PRIFIX + grpcStream.WdHash.Hex() + grpcStream.TxHash
+	dbLabelBak := config.PUB_DB_BAK_PRIFIX + dbLabel
+	dbData, _ := n.db.Get([]byte(dbLabel))
+	if len(dbData) > 0 {
+		log.Debug("[ROUTER]:already have:%v", dbLabel)
+		//重复上报限时，需要时放开下行return 代码
+		//return false
+	} else {
+		//backup data
+		n.db.Put([]byte(dbLabelBak), msg)
+	}
+
+	if _, err = n.router(config.ROUTER_TYPE_WEB, "", msg); err != nil {
+		return false
+	} else {
+		//update db
+		n.db.Put([]byte(dbLabel), msg)
+		//delete db backup
+		n.db.Delete([]byte(dbLabelBak))
+	}
+
 	return true
 }
 
 //提现上报
 func (n *NodeApi) WithDrewRequest(grpcStream *config.GrpcStream) bool {
-	if msg, err := json.Marshal(grpcStream); err != nil {
+	log.Debug("WithDrewRequest:%v", grpcStream)
+	msg, err := json.Marshal(grpcStream)
+	if err != nil {
 		log.Error("WithDrewRequest marshal err: %s", err)
-		//TODO
-	} else {
-		n.router(config.ROUTER_TYPE_WEB, "", msg)
+		return false
 	}
+	dbLabel := config.ROUTER_PRIDFIX + config.WITHDRAW_PRIFIX + grpcStream.WdHash.Hex() + grpcStream.TxHash
+	dbLabelBak := config.PUB_DB_BAK_PRIFIX + dbLabel
+	dbData, _ := n.db.Get([]byte(dbLabel))
+	if len(dbData) > 0 {
+		log.Debug("[ROUTER]:already have:%v", dbLabel)
+		//重复上报限时，需要时放开下行return 代码
+		//return false
+	} else {
+		//backup data
+		n.db.Put([]byte(dbLabelBak), msg)
+	}
+
+	if _, err = n.router(config.ROUTER_TYPE_WEB, "", msg); err != nil {
+		return false
+	} else {
+		//update db
+		n.db.Put([]byte(dbLabel), msg)
+		//delete db backup
+		n.db.Delete([]byte(dbLabelBak))
+	}
+
 	return true
 }
 
 //hash上报
 func (n *NodeApi) HashListRequest(grpcStream *config.GrpcStream) bool {
+	log.Debug("HashListRequest........")
 	if msg, err := json.Marshal(grpcStream); err != nil {
 		log.Error("HashListRequest marshal err: %s", err)
+		return false
 	} else {
-		n.router(config.ROUTER_TYPE_WEB, "", msg)
+		if _, err = n.router(config.ROUTER_TYPE_WEB, "", msg); err != nil {
+			return false
+		}
 	}
 	return true
 }
@@ -213,8 +306,11 @@ func (n *NodeApi) TokenListRequest(grpcStream *config.GrpcStream) bool {
 	log.Debug("TokenListRequest......")
 	if msg, err := json.Marshal(grpcStream); err != nil {
 		log.Error("TokenListRequest marshal err: %s", err)
+		return false
 	} else {
-		n.router(config.ROUTER_TYPE_WEB, "", msg)
+		if _, err = n.router(config.ROUTER_TYPE_WEB, "", msg); err != nil {
+			return false
+		}
 	}
 	return true
 }
@@ -224,8 +320,11 @@ func (n *NodeApi) CoinListRequest(grpcStream *config.GrpcStream) bool {
 	log.Debug("CoinListRequest......")
 	if msg, err := json.Marshal(grpcStream); err != nil {
 		log.Error("CoinListRequest marshal err: %s", err)
+		return false
 	} else {
-		n.router(config.ROUTER_TYPE_WEB, "", msg)
+		if _, err = n.router(config.ROUTER_TYPE_WEB, "", msg); err != nil {
+			return false
+		}
 	}
 	return true
 }
@@ -235,18 +334,33 @@ func (n *NodeApi) HashEnableRequest(grpcStream *config.GrpcStream) bool {
 	log.Debug("HashEnableRequest......")
 	if msg, err := json.Marshal(grpcStream); err != nil {
 		log.Error("HashEnableRequest marshal err: %s", err)
+		return false
 	} else {
-		n.router(config.ROUTER_TYPE_WEB, "", msg)
+		if _, err = n.router(config.ROUTER_TYPE_WEB, "", msg); err != nil {
+			return false
+		}
+	}
+	return true
+}
+//hash 确认上报
+func (n *NodeApi) CheckKeyRequest(grpcStream *config.GrpcStream) bool {
+	log.Debug("CheckKeyRequest......")
+	if msg, err := json.Marshal(grpcStream); err != nil {
+		log.Error("CheckKeyRequest marshal err: %s", err)
+		return false
+	} else {
+		if _, err = n.router(config.ROUTER_TYPE_WEB, "", msg); err != nil {
+			return false
+		}
 	}
 	return true
 }
 
 func (n *NodeApi) router(routerType string, routerName string, msg []byte) (string, error) {
-	log.Debug("router....")
 	if n.conn != nil {
 		client := pb.NewSynchronizerClient(n.conn)
 		if rsp, err := client.Router(context.TODO(), &pb.RouterRequest{routerType, routerName, msg}); err != nil {
-			log.Error("depositTx req failed %v\n", err)
+			log.Error("Router req failed %v\n", err)
 			return "", err
 		} else {
 			return rsp.Code, nil
@@ -339,9 +453,14 @@ func (n *NodeApi) handleStream(streamRsp *pb.StreamRsp) {
 		n.db.Put([]byte(config.HASH_LIST_PRIFIX+streamModel.Hash.Hex()), []byte(streamModel.Flow)) //供查询使用
 	case config.GRPC_HASH_ENABLE_LOG: //同意 log
 		if checkSigns(streamModel.Flow, streamModel.SignInfos, n.db) {
-			n.db.Put([]byte(config.HASH_LIST_PRIFIX+streamModel.Hash.Hex()), []byte(streamModel.Flow))           //供查询使用
-			n.db.Put([]byte(config.PENDING_PRIDFIX+streamModel.Hash.Hex()), streamRsp.Msg)                       //pending
-			config.Ecr20RecordChan <- &config.Ecr20Record{Type: config.ECR20_TYPE_ALLOW, Hash: streamModel.Hash} //上公链
+			if data, _ := n.db.Get([]byte(config.HASH_LIST_PRIFIX+streamModel.Hash.Hex())); data == nil || len(data) == 0 {
+				n.db.Put([]byte(config.HASH_LIST_PRIFIX+streamModel.Hash.Hex()), []byte(streamModel.Flow))           //供查询使用
+				n.db.Put([]byte(config.PENDING_PRIDFIX+streamModel.Hash.Hex()), streamRsp.Msg)                       //pending
+				config.Ecr20RecordChan <- &config.Ecr20Record{Type: config.ECR20_TYPE_ALLOW, Hash: streamModel.Hash} //上公链
+			} else {
+				log.Debug("multi hash allow :%v", streamModel.Hash.Hex())
+				break
+			}
 		}
 	case config.GRPC_HASH_DISABLE_LOG: //禁用 log
 		if checkSigns(streamModel.Flow, streamModel.SignInfos, n.db) { //pending
@@ -352,8 +471,14 @@ func (n *NodeApi) handleStream(streamRsp *pb.StreamRsp) {
 		//TODO 验签
 		if checkWithdrawSign(streamModel.Hash.Hex(), streamModel.Flow, streamModel.WdFlow, n.db) {
 			log.Debug("check sign success！")
-			n.db.Put([]byte(config.WITHDRAW_APPLY_PRIFIX+streamModel.WdHash.Hex()), streamRsp.Msg) // for view
-			n.db.Put([]byte(config.PENDING_PRIDFIX+streamModel.WdHash.Hex()), streamRsp.Msg)       //pending
+			if data, _ := n.db.Get([]byte(config.WITHDRAW_APPLY_PRIFIX + streamModel.WdHash.Hex())); data == nil || len(data) == 0 {
+				n.db.Put([]byte(config.WITHDRAW_APPLY_PRIFIX+streamModel.WdHash.Hex()), streamRsp.Msg) // for view
+			} else {
+				log.Debug("multi withdraw wdHash:%s", streamModel.WdHash.Hex())
+				break
+			}
+
+			n.db.Put([]byte(config.PENDING_PRIDFIX+streamModel.WdHash.Hex()), streamRsp.Msg) //pending
 			category := streamModel.Category
 			if category != nil {
 				switch streamModel.Category.Int64() {

@@ -33,7 +33,16 @@ BOX代码已上传至全球最大的技术开源社区GitHub，待与诸君共�
 监控以太坊公链event log，确认审批流操作，以及充值提现记录等，并将结果通知给代理
 ## 使用步骤：
 
-初始化。首次使用make build命令，再次make rebuild命令，切记，build命令将清除所有数据；
+初始化。首次使用make build命令
+```sh
+make build
+cp config.toml.example  config.toml
+cp log.xml.example  log.xml
+```
+再次make rebuild命令，切记，build命令将清除所有数据；
+```sh
+make rebuild
+```
 将连接代理的地址、端口以及ssl公钥以及证书写入到config.json配置文件中对应的参数中
 将eth公链、比特币公链分别写入到config.json配置文件中对应的参数中
 启动本程序

@@ -14,54 +14,90 @@ var EthAddrTokenMap map[string]*config.TokenInfo = make(map[string]*config.Token
 
 var EthCategoryTokenMap map[int64]*config.TokenInfo = make(map[int64]*config.TokenInfo) //eth category-token map
 
+//获取有效token
+func getEnableTokenMap(db localdb.Database) ([]*config.TokenInfo){
+	var TokenList []*config.TokenInfo
+	if tokenMap, err := db.GetPrifix([]byte(config.TOKEN_PRIFIX)); err != nil {
+		log.Error("get tokenlist err:%s", err)
+	} else {
+		for _, tokenBytes := range tokenMap {
+			tokenInfo := &config.TokenInfo{}
+			if err = json.Unmarshal([]byte(tokenBytes), tokenInfo); err != nil {
+				log.Error("unmarshal err:%s", err)
+			} else {
+				if tokenInfo.Status == "true" {
+					TokenList = append(TokenList, tokenInfo)
+				}
+			}
+		}
+	}
+	return TokenList
+}
+//
+func getEthTokenCount(db localdb.Database)(allCount,enbleCount,disableCount int){
+	if tokenMap, err := db.GetPrifix([]byte(config.TOKEN_PRIFIX)); err != nil {
+		log.Error("get tokenlist err:%s", err)
+	} else {
+		//allCount = len(tokenMap)
+		for _, tokenBytes := range tokenMap {
+			tokenInfo := &config.TokenInfo{}
+			if err = json.Unmarshal([]byte(tokenBytes), tokenInfo); err != nil {
+				log.Error("unmarshal err:%s", err)
+			} else {
+				if tokenInfo.Status == "true" {
+					enbleCount++
+				}else {
+					disableCount++
+				}
+			}
+		}
+	}
+	return disableCount+enbleCount,enbleCount,disableCount
+}
+
+
 //新增或编辑代币
 func AddTokenMap(tokenInfoD *config.TokenInfo, db localdb.Database) (bool, int) {
 	tokenRWMutex.Lock()
 	defer tokenRWMutex.Unlock()
 
 	log.Debug("EthAddrTokenMap...", EthAddrTokenMap)
-
-	tokenInfoS := EthAddrTokenMap[tokenInfoD.ContractAddr]
-	if tokenInfoS != nil { //存在
-		tokenInfoD.Category = tokenInfoS.Category
-	} else {
-
-		tokenLen := len(EthAddrTokenMap)
-		if tokenLen == 0 {
-			tokenLen = 2
+	tokenInfoD.Status = "true"
+	tokenInfo := &config.TokenInfo{}
+	tokenBytes,_ := db.Get([]byte(config.TOKEN_PRIFIX+tokenInfoD.ContractAddr))
+	if len(tokenBytes) > 0 {
+		if err := json.Unmarshal([]byte(tokenBytes), tokenInfo); err != nil {
+			log.Error("unmarshal err:%s", err)
+			return false, len(EthAddrTokenMap)
 		} else {
-			tokenLen = tokenLen + 1 + 1 //TODO 代币从2开始
+			log.Debug("get tokenInfo:",tokenInfo)
+			tokenInfoD.Category = tokenInfo.Category
 		}
-		tokenInfoD.Category = int64(tokenLen)
+	}else {
+		//add new token
+		tokenCount,_,_ := getEthTokenCount(db)
+		tokenCount = tokenCount + 2 //start from 2
+		tokenInfoD.Category = int64(tokenCount)
 	}
-
-	if tokenData, err := json.Marshal(tokenInfoD); err != nil {
+	tokenData, err := json.Marshal(tokenInfoD)
+	if err != nil {
 		log.Error("token marshal err: %s", err)
-	} else {
-		if err = db.Put([]byte(config.TOKEN_PRIFIX+tokenInfoD.ContractAddr), tokenData); err != nil {
-			log.Error("token db land err: %s", err)
-		} else {
-			EthAddrTokenMap[tokenInfoD.ContractAddr] = tokenInfoD
-			EthCategoryTokenMap[tokenInfoD.Category] = tokenInfoD
-			//TODO 上报
-			reportInfo := &config.GrpcStream{Type: config.GRPC_TOKEN_LIST_WEB}
-			if tokenMap, err := db.GetPrifix([]byte(config.TOKEN_PRIFIX)); err != nil {
-				log.Error("get tokenlist err:%s", err)
-			} else {
-				for _, tokenBytes := range tokenMap {
-					tokenInfo := &config.TokenInfo{}
-					if err = json.Unmarshal([]byte(tokenBytes), tokenInfo); err != nil {
-						log.Error("unmarshal err:%s", err)
-					} else {
-						reportInfo.TokenList = append(reportInfo.TokenList, tokenInfo)
-					}
-				}
-				config.ReportedChan <- reportInfo
-			}
-			return true, len(EthAddrTokenMap)
-		}
+		return false, len(EthAddrTokenMap)
 	}
-	return false, len(EthAddrTokenMap)
+	if err = db.Put([]byte(config.TOKEN_PRIFIX+tokenInfoD.ContractAddr), tokenData); err != nil {
+		log.Error("token db land err: %s", err)
+	} else {
+		EthAddrTokenMap[tokenInfoD.ContractAddr] = tokenInfoD
+		EthCategoryTokenMap[tokenInfoD.Category] = tokenInfoD
+		//TODO 上报
+		reportInfo := &config.GrpcStream{Type: config.GRPC_TOKEN_LIST_WEB}
+		reportInfo.TokenList = getEnableTokenMap(db)
+		config.ReportedChan <- reportInfo
+
+		return true, len(reportInfo.TokenList)
+	}
+	_,tokenEnableCount,_ := getEthTokenCount(db)
+	return false, tokenEnableCount
 }
 
 func DelTokenMap(tokenInfoD *config.TokenInfo, db localdb.Database) (bool, int) {
@@ -70,29 +106,28 @@ func DelTokenMap(tokenInfoD *config.TokenInfo, db localdb.Database) (bool, int) 
 
 	tokenInfoS := EthAddrTokenMap[tokenInfoD.ContractAddr]
 	if tokenInfoS != nil { //存在
-		db.Delete([]byte(config.TOKEN_PRIFIX + tokenInfoD.ContractAddr))
+		//db.Delete([]byte(config.TOKEN_PRIFIX + tokenInfoD.ContractAddr))
+		tokenInfoS.Status = "false"
+		tokenData, err := json.Marshal(tokenInfoS)
+		if  err != nil {
+			log.Error("token marshal err: %s", err)
+		}
+		db.Put([]byte(config.TOKEN_PRIFIX+tokenInfoS.ContractAddr), tokenData)
+
 		delete(EthAddrTokenMap, tokenInfoS.ContractAddr)
 		delete(EthCategoryTokenMap, tokenInfoS.Category)
 		//TODO 上报
 		reportInfo := &config.GrpcStream{Type: config.GRPC_TOKEN_LIST_WEB}
-		if tokenMap, err := db.GetPrifix([]byte(config.TOKEN_PRIFIX)); err != nil {
-			log.Error("get tokenlist err:%s", err)
-		} else {
-			for _, tokenBytes := range tokenMap {
-				tokenInfo := &config.TokenInfo{}
-				if err = json.Unmarshal([]byte(tokenBytes), tokenInfo); err != nil {
-					log.Error("unmarshal err:%s", err)
-				} else {
-					reportInfo.TokenList = append(reportInfo.TokenList, tokenInfo)
-				}
-			}
-			config.ReportedChan <- reportInfo
-		}
-		return true, len(EthAddrTokenMap)
+		reportInfo.TokenList = getEnableTokenMap(db)
+		config.ReportedChan <- reportInfo
+
+		return true, len(reportInfo.TokenList)
 	} else {
 		log.Error("del token failed. not found token address: %s", tokenInfoD.ContractAddr)
 	}
-	return false, len(EthAddrTokenMap)
+
+	_,tokenEnableCount,_ := getEthTokenCount(db)
+	return false, tokenEnableCount
 }
 
 func TokenList(db localdb.Database) bool {
@@ -109,9 +144,12 @@ func TokenList(db localdb.Database) bool {
 			if err = json.Unmarshal([]byte(tokenBytes), tokenInfo); err != nil {
 				log.Error("unmarshal err:%s", err)
 			} else {
-				reportInfo.TokenList = append(reportInfo.TokenList, tokenInfo)
+				if tokenInfo.Status == "true" {
+					reportInfo.TokenList = append(reportInfo.TokenList, tokenInfo)
+				}
 			}
 		}
+
 		config.RealTimeStatus.TokenCount = len(tokenMap)
 		if statusByte, err := json.Marshal(config.RealTimeStatus); err != nil {
 			log.Error("hashList json marshal error:%v", err)
@@ -139,9 +177,26 @@ func LoadTokenFrom(db localdb.Database) {
 			if err = json.Unmarshal([]byte(tokenBytes), tokenInfo); err != nil {
 				log.Error("LoadTokenFrom unmarshal err: %s", err)
 			} else {
-				EthAddrTokenMap[tokenInfo.ContractAddr] = tokenInfo
-				EthCategoryTokenMap[tokenInfo.Category] = tokenInfo
-				log.Error("unmarshal err:%s", err)
+				//db.Delete([]byte(config.TOKEN_PRIFIX+tokenInfo.ContractAddr))
+				//continue
+				if tokenInfo.Status == "true"  {
+					EthAddrTokenMap[tokenInfo.ContractAddr] = tokenInfo
+					EthCategoryTokenMap[tokenInfo.Category] = tokenInfo
+				}else if len(tokenInfo.Status) == 0{
+					//DB兼容处理
+					log.Info("[OLD TOKEN DB][%v]",tokenInfo)
+					tokenInfo.Status = "true"
+					EthAddrTokenMap[tokenInfo.ContractAddr] = tokenInfo
+					EthCategoryTokenMap[tokenInfo.Category] = tokenInfo
+					log.Info("[DO UPDATE][%v]",tokenInfo)
+					tokenData, err := json.Marshal(tokenInfo)
+					if err != nil {
+						log.Error("token marshal err: %s", err)
+					}
+					if err = db.Put([]byte(config.TOKEN_PRIFIX+tokenInfo.ContractAddr), tokenData); err != nil {
+						log.Error("token db land err: %s", err)
+					}
+				}
 			}
 		}
 	}
@@ -151,7 +206,7 @@ func LoadTokenFrom(db localdb.Database) {
 
 func GetTokenByAddr(addr string) *config.TokenInfo {
 	tokenRWMutex.Lock()
-	log.Debug("EthAddrTokenMap....", EthAddrTokenMap)
+	//log.Debug("EthAddrTokenMap....", EthAddrTokenMap)
 	defer tokenRWMutex.Unlock()
 	return EthAddrTokenMap[addr]
 }

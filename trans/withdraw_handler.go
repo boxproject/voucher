@@ -44,6 +44,7 @@ func (h *withdrawHandler) Scan(log *common.EtherLog) error {
 		if wdHash, err := h.context.Db.Get([]byte(config.WITHDRAW_TX_PRIFIX + log.TxHash.Hex())); err != nil {
 			logger.Error("get db err: %s", err)
 		} else {
+			logger.Debug("withdrawHandler txid: %s, amount: %d", log.TxHash.Hex(),  amount)
 			config.ReportedChan <- &config.GrpcStream{Type: config.GRPC_WITHDRAW_WEB,  To: address, Amount: amount, WdHash: common.HexToHash(string(wdHash)),TxHash: log.TxHash.Hex()}
 		}
 	}

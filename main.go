@@ -37,6 +37,8 @@ import (
 	"github.com/mdp/qrterminal"
 	"gopkg.in/urfave/cli.v1"
 	"github.com/awnumar/memguard"
+	"path/filepath"
+	"strings"
 )
 
 func main() {
@@ -52,7 +54,12 @@ func run(ctx *cli.Context) (err error) {
 		cfg *config.Config
 		db  localdb.Database
 	)
-	logger.LoadConfiguration("log.xml")
+	dir, err := filepath.Abs(filepath.Dir(os.Args[0]))
+	if err != nil {
+		logger.Error("get file path error",err)
+	}
+	execDir := strings.Replace(dir, "\\", "/", -1)
+	logger.LoadConfiguration(execDir+"/log.xml")
 
 	//config
 	filePath := ctx.String("c")

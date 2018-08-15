@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"sync"
 	"time"
+	"errors"
 )
 
 var (
@@ -89,7 +90,7 @@ func WriteNumberToFile(filePath string, blkNumber *big.Int) error {
 func ReadNumberFromFile(filePath string) (*big.Int, error) {
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		log.Debug("file not found, %v", err)
-		return big.NewInt(0), nil
+		return big.NewInt(0), err
 	}
 
 	data, err := ioutil.ReadFile(filePath)
@@ -98,7 +99,10 @@ func ReadNumberFromFile(filePath string) (*big.Int, error) {
 	}
 
 	data = bytes.TrimSpace(data)
-	delta, _ := big.NewInt(0).SetString(string(data), 10)
+	delta, isok := big.NewInt(0).SetString(string(data), 10)
+	if isok == false {
+		return big.NewInt(0), errors.New("data is nil")
+	}
 	return delta, nil
 }
 

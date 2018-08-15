@@ -16,7 +16,7 @@
 #    |- scripts
 #     \- client-cert.sh
 #     \- server-cert.sh
-basedir = "/Users/admin/Work/src/github.com/boxproject/voucher/build/"
+basedir = "/opt/box/voucher"
 
 [agentservice]
 # 服务名称
@@ -25,14 +25,14 @@ name = "voucher"
 alias = "server1"
 companionname = "companion"
 #http
-ipandport = "192.168.199.150:9092"
+ipandport = "127.0.0.1:19092"
 pattern = "/addkey"
 # rpc
 rpcapi = "127.0.0.1:50502"
 # 如果不填该参数，默认查找 ${basedir}/certs/${name}.pem
-clientcert = "/Users/admin/ssl/client.pem"
+clientcert = "/opt/box/voucher/ssl/client.pem"
 # 如果不填该参数，默认查找 ${basedir}/certs/${name}.key
-clientkey = "/Users/admin/ssl/client.key"
+clientkey = "/opt/box/voucher/ssl/client.key"
 
 [secret]
 # 服务器端密钥字节数
@@ -40,7 +40,7 @@ secretLength = 40
 # 初始化时下载客户端证书一次性密码字节数
 passLength = 8
 # 授权APP的数量
-appNum = 3
+appNum = 2
 
 [database]
 # 如果不提供该参数，默认为 ${basedir}/db
@@ -72,19 +72,19 @@ ip = "0.0.0.0"
 
 # 以太坊公链节点
 [ethereum]
-scheme = "ws://127.0.0.1:8546"
-delayedBlocks = 30
+scheme = "ws://localhost:8546"
+delayedBlocks = 0
 cursorBlocks = 15900
 retries = 10
-accountPoolSize = 10
-blockNoFilePath = "/Users/admin/Work/src/github.com/boxproject/voucher/blockno.txt"
-nonceFilePath = "/Users/admin/Work/src/github.com/boxproject/voucher/nonce.txt"
+accountPoolSize = 2
+blockNoFilePath = "/opt/box/voucher/blockno.txt"
+nonceFilePath = "/opt/box/voucher/nonce.txt"
 
 # bitcoin node
 [bitcoin]
-type = "regtest"
+type = "main"
 host = "localhost:8332"
-rpcuser="admin"
-rpcpass="51318c0c86d5b51b3beffbc02b724e"
-blockNoFilePath = "/Users/admin/Work/src/github.com/boxproject/voucher/btcBlockno.txt"
+rpcuser="user"
+rpcpass="pass"
+blockNoFilePath = "/opt/box/voucher/btcBlockno.txt"
 confirmations=6

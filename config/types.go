@@ -64,6 +64,7 @@ const (
 	HASH_LIST_PRIFIX      = "v_hl_" //hash list
 	WITHDRAW_APPLY_PRIFIX = "v_wa_" //withdraw apply
 	PENDING_PRIDFIX       = "p_"    //pending
+	ROUTER_PRIDFIX        = "r_"    //grpc router
 )
 
 const (
@@ -75,6 +76,7 @@ const (
 
 //pub db key
 const (
+	PUB_DB_BAK_PRIFIX	= "pub_db_bak_"
 	PUBKEY_ETH         = "pub_key_eth"
 	PUBKEY_BTC         = "pub_key_btc"
 	DEPOSIT_PRIFIX     = "pub_dp_"
@@ -150,6 +152,8 @@ const (
 	GRPC_COIN_LIST_WEB    = "16" //coin上报
 	GRPC_HASH_ENABLE_WEB  = "17" //hash enable 公链log
 	GRPC_HASH_DISABLE_WEB = "18" //hash enable 公链log
+
+	GRPC_CHECK_KEY_WEB  = "19" 	//密码验证
 )
 
 //公链操作类型
@@ -199,6 +203,7 @@ const (
 	VOUCHER_OPERATE_TOKEN_DEL    = "9"  //token 删除
 	VOUCHER_OPERATE_TOKEN_LIST   = "10" //token list 查询
 	VOUCHER_OPERATE_COIN         = "11" //coin 操作
+	VOUCHER_OPERATE_CHECK_KEY	 = "12" //密码验证
 )
 
 type BoxRecord struct {
@@ -247,6 +252,7 @@ type GrpcStream struct {
 }
 
 type TokenInfo struct {
+	Status       string
 	TokenName    string
 	Decimals     int64
 	ContractAddr string
@@ -405,6 +411,7 @@ type Operate struct {
 	CoinCategory int64  //币种分类
 	CoinUsed     bool   //币种使用
 	Sign         string //签名
+	PassSign     string //密码签名
 }
 
 var OperateChan chan *Operate = make(chan *Operate, CHAN_MAX_SIZE)

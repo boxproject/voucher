@@ -41,7 +41,6 @@ func RunDatabase(cfg *config.Config) (Database, error) {
 
 func prepare(db Database, cfg *config.Config) (err error) {
 	// 如果没有初始化过，则需要产生证书
-	// Create certificate if no initialization yet
 	if err = common.GenCert(cfg, config.SVRCERTSCRIPT); err != nil {
 		errors.GenServerCertErr.Err = err
 		return errors.GenServerCertErr

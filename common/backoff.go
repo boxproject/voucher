@@ -26,6 +26,9 @@ var DefaultBackoff = Backoff{
 	jitter:    0.2,
 }
 
+//重连次数记录
+var RetryCount = 0
+
 type Backoff struct {
 	MaxDelay  time.Duration
 	baseDelay time.Duration

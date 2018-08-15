@@ -135,6 +135,12 @@ func (w *EthHandler) loadAddr() error {
 	}
 	w.quitCh = make(chan struct{}, 1)
 	w.ethQuitCh = make(chan struct{}, 1)
+
+	addrByte ,_ := w.client.CodeAt(context.Background(),caddr,nil)
+	if len(addrByte) <= 0 {
+		return errors.New("contract not ready..")
+	}
+
 	return nil
 }
 
@@ -172,7 +178,7 @@ func (w *EthHandler) reloadBlock() error {
 
 	cursorBlkNumber, err := util.ReadNumberFromFile(w.conf.BlockNoFilePath) //block cfg
 	if err != nil {
-		return err
+		//return err
 	}
 
 	// 获取当前节点上最大区块号
@@ -189,20 +195,34 @@ func (w *EthHandler) reloadBlock() error {
 	}
 	util.WriteNumberToFile(w.conf.NonceFilePath, big.NewInt(int64(nonce)))
 
-	// 获取向前推N个区块的big.Int值
-	checkBefore := w.conf.DelayedBlocks
-	log.Debug("before:: max blkNumber: %s, cursor blkNumber: %s", maxBlkNumber.String(), cursorBlkNumber.String())
-
-	for maxBlkNumber.Cmp(cursorBlkNumber) >= int(checkBefore.Int64()) {
-		if err = w.checkBlock(new(big.Int).Add(cursorBlkNumber, checkBefore)); err != nil {
-			return err
-		}
-		// 记录下当前的 blocknumber 供恢复用
+	if cursorBlkNumber.Int64() <= 0 { //文件数据有误
+		cursorBlkNumber = maxBlkNumber
 		util.WriteNumberToFile(w.conf.BlockNoFilePath, cursorBlkNumber)
-		cursorBlkNumber = new(big.Int).Add(cursorBlkNumber, big.NewInt(1))
+	} else {
+		// 获取向前推N个区块的big.Int值
+		checkBefore := w.conf.DelayedBlocks
+		log.Debug("before:: max blkNumber: %s, cursor blkNumber: %s", maxBlkNumber.String(), cursorBlkNumber.String())
+
+		for big.NewInt(0).Sub(maxBlkNumber, cursorBlkNumber).Int64() >= checkBefore.Int64() {
+			select {
+				case _,isClose := <- w.ethQuitCh:
+					if !isClose {
+						log.Info("[CHANNEL CLOSED]reloadBlock thread exitCh!")
+						return nil
+					}
+			default:
+				if err = w.checkBlock(new(big.Int).Add(cursorBlkNumber, checkBefore)); err != nil {
+					log.Error("checkBlock error:%v",err)
+					continue
+					//return err
+				}
+				cursorBlkNumber = new(big.Int).Add(cursorBlkNumber, big.NewInt(1))
+			}
+
+		}
 	}
 
-	log.Debug("after:: cursor blkNumber: %s", cursorBlkNumber.String())
+	log.Debug("reloadBlock:: cursor blkNumber: %s", cursorBlkNumber.String())
 	return nil
 }
 
@@ -214,9 +234,11 @@ func (w *EthHandler) ethChainHandler() {
 	loop := true
 	for loop {
 		select {
-		case <-w.ethQuitCh:
-			log.Info("PriEthHandler::SendMessage thread exitCh!")
-			loop = false
+		case _,isClose := <- w.ethQuitCh:
+			if !isClose {
+				log.Info("[CHANNEL CLOSED]ethChainHandler thread exitCh!")
+				loop = false
+			}
 		case data, ok := <-config.Ecr20RecordChan:
 			if ok {
 				switch data.Type {
@@ -273,7 +295,6 @@ func (w *EthHandler) ethDisAllowHandler(record *config.Ecr20Record) error {
 	util.NoRWMutex.Lock()
 	defer util.NoRWMutex.Unlock()
 	bank, err := NewBank(w.conf.ContractAddress, w.client)
-
 	if err != nil {
 		log.Error("NewBank error:", err)
 		return err
@@ -321,6 +342,7 @@ func (w *EthHandler) ethTransferHandler(record *config.Ecr20Record) error {
 		tx, err := bank.Withdraw(opts, record.To, record.Amount, record.Hash)
 		if err != nil {
 			log.Error("withDraw error:%s", err)
+			config.ReportedChan <- &config.GrpcStream{Type: config.GRPC_WITHDRAW_TX_WEB, WdHash: record.WdHash, TxHash: ""}
 		} else {
 			log.Info("eth transfer tx:%v, wd:%v, to:%v", tx.Hash().Hex(), record.WdHash.Hex(), record.To.Hex())
 			nonce = nonce.Add(nonce, big.NewInt(config.NONCE_PLUS))
@@ -336,8 +358,10 @@ func (w *EthHandler) ethTransferHandler(record *config.Ecr20Record) error {
 	} else { //eth代币
 		if token := token.GetTokenByCategory(record.Category.Int64()); token != nil {
 			tx, err := bank.TransferERC20(opts, common.HexToAddress(token.ContractAddr), record.To, record.Amount, record.Hash)
+			log.Debug("TransferERC20:[contract=%v][to=%v][amount=%v][hash=%v]",token.ContractAddr,record.To.Hex(),record.Amount.String(),record.Hash.Hex())
 			if err != nil {
 				log.Error("withDraw error:%s", err)
+				config.ReportedChan <- &config.GrpcStream{Type: config.GRPC_WITHDRAW_TX_WEB, WdHash: record.WdHash, TxHash: ""}
 			} else {
 				log.Info("token transfer tx:%v, wd:%v, to:%v", tx.Hash().Hex(), record.WdHash.Hex(), record.To.Hex())
 				nonce = nonce.Add(nonce, big.NewInt(config.NONCE_PLUS))
@@ -360,24 +384,22 @@ func (w *EthHandler) ethTransferHandler(record *config.Ecr20Record) error {
 func (w *EthHandler) listen() {
 	ch := make(chan *types.Header)
 	sid, err := w.client.SubscribeNewHead(context.Background(), ch)
-	if err != nil {
-		log.Error("CANNOT subscribe the block head. cause: %v", err)
-		return
+	if err == nil {
+		err = w.recv(sid, ch)
+		defer sid.Unsubscribe()
 	}
 
-	defer sid.Unsubscribe()
-
-	var backoff = common.DefaultBackoff
-	// blocked by for loop
-	if err = w.recv(sid, ch); err != nil {
-		log.Error("receive from public ethereum node failed. cause: %v", err)
-		// reconnect after backoff time
-		d := backoff.Duration(w.conf.Retries)
+	//retry connect
+	if err != nil {
+		log.Error("[ETH CONNECT ERROR]: %v", err)
+		d := common.DefaultBackoff.Duration(common.RetryCount)
 		if d > 0 {
 			time.Sleep(d)
+			log.Info("[RETRY ETH CONNECT][%v] sleep:%v", common.RetryCount, d)
+			common.RetryCount++
 			go w.listen()
+			return
 		}
-		log.Error("retry %d times and exited, cause: %v", w.conf.Retries, err)
 	}
 	log.Debug("watcher listener stopped.")
 }
@@ -388,7 +410,8 @@ func (w *EthHandler) Stop() {
 		w.quitCh <- struct{}{}
 	}
 	if w.ethQuitCh != nil {
-		w.ethQuitCh <- struct{}{}
+		//w.ethQuitCh <- struct{}{}
+		close(w.ethQuitCh)
 	}
 	//if w.accountHandler.quitChannel != nil {
 	//	w.accountHandler.Stop() //停止生成账号
@@ -400,20 +423,30 @@ func (w *EthHandler) Stop() {
 
 //recv 公链请求
 func (w *EthHandler) recv(sid ethereum.Subscription, ch <-chan *types.Header) error {
+	log.Debug("EthHandler recv...")
 	var err error
 	for {
 		select {
 		case <-w.quitCh:
+			log.Debug("EthHandler recv quit...")
 			return nil
 		case err = <-sid.Err():
 			if err != nil {
+				log.Error("[ETH RECV]sid.Err:%v",err.Error())
 				return err
 			}
 		case head := <-ch:
+			if common.RetryCount != 0 {
+				//发现掉线,重新扫描
+				w.reloadBlock()
+				common.RetryCount = 0
+				continue
+			}
 			if head.Number == nil {
 				continue
 			}
 			if err = w.checkBlock(head.Number); err != nil {
+				log.Error("[ETH RECV]checkBlock:%v",err.Error())
 				return err
 			}
 		}
@@ -437,9 +470,13 @@ func (w *EthHandler) checkBlock(blkNumber *big.Int) error {
 	} else {
 		if len(logs) != 0 {
 			for _, enventLog := range logs {
-				log.Debug("enventLog: %s", enventLog.Topics[0].Hex())
+				//log.Debug("enventLog: %s", enventLog.Topics[0].Hex())
+				if enventLog.Topics == nil || len(enventLog.Topics) == 0 {
+					log.Debug("enventLog topics nil")
+					continue
+				}
 				handler, ok := w.conf.Events[enventLog.Topics[0]]
-				log.Debug("enventLog ok: %s", ok)
+				//log.Debug("enventLog ok: %s", ok)
 				if !ok {
 					continue
 				}

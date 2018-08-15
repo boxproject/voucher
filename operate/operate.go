@@ -26,6 +26,8 @@ import (
 	"github.com/boxproject/voucher/token"
 	"github.com/boxproject/voucher/trans"
 	"github.com/boxproject/voucher/util"
+	"github.com/awnumar/memguard"
+	"github.com/ethereum/go-ethereum/common"
 )
 
 //prefix+host ->pass
@@ -105,6 +107,8 @@ func (handler *OperateHandler) Start() {
 				case config.VOUCHER_OPERATE_COIN:
 					handler.coin(data)
 					break
+				case config.VOUCHER_OPERATE_CHECK_KEY:
+					handler.operateCheckKeys(data)
 				default:
 					log.Info("unknow asy req: %s", data.Type)
 				}
@@ -282,6 +286,9 @@ func (handler *OperateHandler) pause(operate *config.Operate) {
 		handler.ethHander.Stop()
 		config.RealTimeStatus.Status = config.PASSWORD_STATUS_OK
 		config.RealTimeStatus.ServerStatus = config.VOUCHER_STATUS_PAUSED
+		//distory memory
+		memguard.DestroyAll()
+
 		log.Info("stop success!")
 		landStatus(handler.db, config.REQ_PAUSE)
 	}
@@ -308,7 +315,7 @@ func (handler *OperateHandler) addToken(operate *config.Operate) {
 		log.Info("token add sign check err")
 		return
 	}
-	tokenInfo := &config.TokenInfo{TokenName: operate.TokenName, Decimals: operate.Decimals, ContractAddr: operate.ContractAddr}
+	tokenInfo := &config.TokenInfo{TokenName: operate.TokenName, Decimals: operate.Decimals, ContractAddr: strings.ToLower(operate.ContractAddr)}
 
 	if b, l := token.AddTokenMap(tokenInfo, handler.db); !b {
 		log.Info("add token failed.")
@@ -325,7 +332,7 @@ func (handler *OperateHandler) delToken(operate *config.Operate) {
 		log.Info("token add sign check err")
 		return
 	}
-	tokenInfo := &config.TokenInfo{TokenName: operate.TokenName, Decimals: operate.Decimals, ContractAddr: operate.ContractAddr}
+	tokenInfo := &config.TokenInfo{TokenName: operate.TokenName, Decimals: operate.Decimals, ContractAddr: strings.ToLower(operate.ContractAddr)}
 
 	if b, l := token.DelTokenMap(tokenInfo, handler.db); !b {
 		log.Info("add token failed.")
@@ -386,6 +393,41 @@ func (handler *OperateHandler) coin(operate *config.Operate) {
 
 }
 
+type SHashPass struct {
+	hash string
+	pass string
+}
+
+func (handler *OperateHandler) operateCheckKeys(operate *config.Operate) {
+	log.Debug("operateCheckKeys...")
+	isTure := false
+
+	if !checkSign(operate.Hash, operate.Sign, operate.AppId, handler.db){
+		log.Info("check hash failed")
+		isTure = false
+	}else {
+		passWord := getKey(operate.Password, operate.PassSign, handler.db, operate.AppId)
+		if passWord == "" {
+			log.Error("password get failed.")
+			isTure = false
+		}else {
+			isTure = trans.CheckPasswordHash(handler.db,operate.AppId,passWord)
+		}
+	}
+
+	rep := &config.GrpcStream{
+		Type: config.GRPC_CHECK_KEY_WEB,
+		Hash:common.HexToHash(operate.Hash),
+		AppId:operate.AppId}
+	if isTure {
+		rep.Status = "TRUE"
+	}else {
+		rep.Status = "FALSE"
+	}
+	config.ReportedChan <- rep
+
+}
+
 //key generate
 func generateKey(db localdb.Database, reqType string, appNum int, appId string, pass string, code string, opinion bool) (bool, int) {
 
@@ -413,11 +455,18 @@ func generateKey(db localdb.Database, reqType string, appNum int, appId string, 
 	batchCountMap[reqType] = batchCount
 
 	passMap[reqType+appId] = pass
+
 	if reqType == config.REQ_CREATE { //创建
 		codeMap[reqType+appId] = code
 	}
 
 	authorizedMap[reqType+appId] = opinion
+
+	//check passwd HASH
+	if reqType != config.REQ_CREATE {
+		//update
+		authorizedMap[reqType+appId] = trans.CheckPasswordHash(db,appId,pass)
+	}
 
 	if batchCount < appNum { //未输入完整密码
 
@@ -458,11 +507,26 @@ func generateKey(db localdb.Database, reqType string, appNum int, appId string, 
 
 			if !trans.ExistPrivateKeyHash(db) { //不存在
 				if trans.RecoverPrivateKey(db, passBytes...) == nil {
+					//record passwd HASH
+					for k, v := range passMap {
+						//get appid
+						appid := strings.Replace(k,config.REQ_CREATE,"",-1)
+						trans.RecordPasswordHash(db, appid, v)
+					}
 					return true, config.PASSWORD_STATUS_FAILED
 				}
 			}
 		} else { //校验
 			if trans.CheckPrivateKey(db, passBytes...) {
+				//兼容老的DB操作，每次校验正确刷新用户的密码HASH
+				for k, v := range passMap {
+					if strings.HasPrefix(k, reqType) {
+						//get appid
+						appid := strings.Replace(k,reqType,"",-1)
+						trans.RecordPasswordHash(db, appid, v)
+					}
+				}
+
 				return true, config.PASSWORD_STATUS_OK
 			} else {
 				return false, config.PASSWORD_STATUS_FAILED
@@ -509,7 +573,7 @@ func getKey(data, sign string, db localdb.Database, appId string) string {
 
 func checkSign(flow, sign, appId string, db localdb.Database) bool {
 	if err := util.RsaSignVer([]byte(flow), []byte(sign), db, appId); err != nil {
-		log.Info("check sign failed.")
+		log.Info("check sign failed, err:%v",err)
 		return false
 	}
 	return true

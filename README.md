@@ -71,6 +71,8 @@ There are 5 main functionalites for this voucher progam:
 Use the following command for the first time run
 ```sh
 make build
+cp config.toml.example  config.toml
+cp log.xml.example  log.xml
 ```
 Otherwise, use this command
 ```sh
