@@ -2,6 +2,8 @@
 
 # PRODUCT INFORMATION
 
+[![Build Status](https://travis-ci.org/boxproject/voucher.svg?branch=master)](https://travis-ci.org/boxproject/voucher) [![Hex.pm](https://img.shields.io/hexpm/l/plug.svg)](https://www.apache.org/licenses/LICENSE-2.0) [![language](https://img.shields.io/badge/golang-%5E1.10-blue.svg)]()
+
 **Product name**: BOX
 
 **Description**: Enterprise-grade security solution for digital assets custody, using a cryptographically secure offline network.
